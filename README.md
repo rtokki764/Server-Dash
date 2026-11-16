@@ -118,7 +118,9 @@ services:
 ```
 
 - `scope: user` 는 `systemctl --user` 서비스, `manual` 은 systemd 가 아닌 프로그램(포트로만 확인)
-- 센서(`sensors:`)·알림(`notify:`) 같은 건 선택이야. 없으면 그 부분만 빠져
+- 센서: AMD APU/GPU(BC250 등)는 `sensors:` 를 안 적어도 **자동으로 찾아** (APU·GPU 온도, 전력 등). 칩이 다르면 `sensors:` 로 덮어써
+- **Agent 탭**은 Hermes Agent 를 돌리는 서버에서만 나와. `config.yaml` 에 `hermes:` (unit 포함)를 적어야 켜져 — `config.example.yaml` 맨 아래 예시 참고
+- 알림(`notify:`) 같은 건 선택이야. 없으면 그 부분만 빠져
 - 경고 기준은 `thresholds:` 로 바꿀 수 있어 (기본: 메모리 85/95%, 디스크 80/90% 등)
 - `dashboard.title` 을 비워 두면 hostname 이 제목이야
 

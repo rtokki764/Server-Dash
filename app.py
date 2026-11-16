@@ -44,7 +44,21 @@ _TH_DEFAULT = {
     "telegram_reconnects_per_hour": {"warn": 3, "bad": 20},
 }
 TH = {**_TH_DEFAULT, **(CFG.get("thresholds") or {})}
-SENS = CFG.get("sensors") or {}
+def _auto_sensors():
+    """config.yaml 에 sensors 가 없어도 AMD APU/GPU(BC250 등)면 알아서 찾음. 없는 센서는 값이 None 이라 화면에서 그냥 빠짐."""
+    card = next((c for c in sorted(glob("/sys/class/drm/card[0-9]*"))
+                 if Path(c, "device/mem_info_vram_used").exists()), "/sys/class/drm/card0")
+    dev = card + "/device/"
+    return {
+        "gpu_busy": dev + "gpu_busy_percent", "vram_used": dev + "mem_info_vram_used",
+        "vram_total": dev + "mem_info_vram_total", "gtt_used": dev + "mem_info_gtt_used",
+        "gtt_total": dev + "mem_info_gtt_total",
+        "apu_temp": {"chip": "k10temp", "label": "Tctl"}, "gpu_temp": {"chip": "amdgpu", "label": "edge"},
+        "apu_power": {"chip": "amdgpu", "label": "PPT"}, "pump_fan": {"chip": "nct6686", "label": "Pump Fan"},
+    }
+
+
+SENS = {**_auto_sensors(), **(CFG.get("sensors") or {})}   # config 에 적은 것이 우선
 # 제목: config의 title이 비어 있으면 서버 hostname을 그대로 씀 → 어느 서버든 복사해서 사용 가능
 TITLE = (D.get("title") or "").strip() or socket.gethostname()
 
