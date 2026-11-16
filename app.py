@@ -596,6 +596,7 @@ def read_hermes_state():
         level = "bad" if prof in parked else max((p["level"] for p in pl), key=["ok", "warn", "bad"].index, default="off")
         out["bots"].append({"id": prof, "name": m.get("name", prof), "role": m.get("role"),
                             "mm_user": m.get("mattermost"), "tg_user": _tg_norm(m.get("telegram")) or None,
+                            "tg_locked": prof in _FILE_TG, "mm_locked": prof in _FILE_MM,   # config.yaml 에 적힌 값이면 화면에서 못 고침 (끊기 버튼 숨김)
                             "parked": prof in parked, "level": level, "platforms": pl,
                             "last": a.get("last"), "model": a.get("model"), "today": a.get("today", 0)})
     return out

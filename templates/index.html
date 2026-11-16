@@ -450,8 +450,8 @@ const OPEN = {{ open_cfg | tojson }};
 const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 // 봇 대화방을 앱으로 바로 여는 주소 (없으면 null → 그냥 칩)
 const mmSetup = (b, inner) => `<button type="button" class="chip" data-mmbot="${esc(b.id)}" title="눌러서 Mattermost 서버·팀·이 봇의 사용자 이름을 알려 주면, 다음부터 이 칩으로 대화방이 열려">${inner}<span class="go">＋설정</span></button>`;
-const mmClear = (b, plat) => plat === "Mattermost" && b.mm_user ? `<button type="button" class="btn mini ghost" data-mmclear="${esc(b.id)}" data-cur="${esc(b.mm_user)}" title="저장한 Mattermost 사용자 이름(@${esc(b.mm_user)})을 지워서 다시 입력할 수 있게 해">끊기</button>` : "";
-const tgEdit = (b, plat) => plat === "Telegram" && b.tg_user ? `<button type="button" class="btn mini ghost" data-tgclear="${esc(b.id)}" data-cur="${esc(b.tg_user)}" title="저장한 텔레그램 봇 아이디(@${esc(b.tg_user)})를 지워서 다시 입력할 수 있게 해">끊기</button>` : "";
+const mmClear = (b, plat) => plat === "Mattermost" && b.mm_user && !b.mm_locked ? `<button type="button" class="btn mini ghost" data-mmclear="${esc(b.id)}" data-cur="${esc(b.mm_user)}" title="저장한 Mattermost 사용자 이름(@${esc(b.mm_user)})을 지워서 다시 입력할 수 있게 해">끊기</button>` : "";
+const tgEdit = (b, plat) => plat === "Telegram" && b.tg_user && !b.tg_locked ? `<button type="button" class="btn mini ghost" data-tgclear="${esc(b.id)}" data-cur="${esc(b.tg_user)}" title="저장한 텔레그램 봇 아이디(@${esc(b.tg_user)})를 지워서 다시 입력할 수 있게 해">끊기</button>` : "";
 function appLink(bot, plat) {
   if (plat === "Mattermost" && bot.mm_user && OPEN.team) {
     const host = (!IS_MOBILE && OPEN.at_office && OPEN.server_office) ? OPEN.server_office : OPEN.server;
