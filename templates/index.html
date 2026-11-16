@@ -65,6 +65,7 @@
          border: 1px solid var(--line); background: var(--panel); color: var(--fg); white-space: nowrap; flex: none; }
   .btn:hover { border-color: var(--muted); }
   .btn.ghost { color: var(--muted); }
+  a.btn { text-decoration: none; display: inline-block; }
   .btn:disabled { opacity: .5; cursor: default; }
   .btn.mini { font-size: 11.5px; padding: 1px 8px; border-radius: 5px; font-weight: 600; }
 
@@ -461,6 +462,15 @@ function appLink(bot, plat) {
   if (plat === "Telegram") return bot.tg_user ? (IS_MOBILE ? `https://t.me/${bot.tg_user}` : `tg://resolve?domain=${bot.tg_user}`) : null;
   return null;
 }
+// Mattermost 웹 링크 (앱이 없거나 앱 링크가 안 열릴 때용 보조). 사내망 IP·localhost 는 http, 나머지는 https
+function mmWebLink(bot) {
+  if (!bot.mm_user || !OPEN.team) return null;
+  const host = (!IS_MOBILE && OPEN.at_office && OPEN.server_office) ? OPEN.server_office : OPEN.server;
+  if (!host) return null;
+  const proto = /^(localhost|\d{1,3}(\.\d{1,3}){3})(:|\/|$)/i.test(host) ? "http" : "https";
+  return `${proto}://${host}/${OPEN.team}/messages/@${bot.mm_user}`;
+}
+const mmWeb = (b, plat) => { const u = plat === "Mattermost" ? mmWebLink(b) : null; return u ? `<a class="btn mini ghost" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="앱이 안 열리면 브라우저로 ${esc(b.name || b.id)} 대화방 열기">웹</a>` : ""; };
 // 칩: 링크가 있으면 누를 수 있게 <a>
 const ignoreBtn = (botId, plat) => `<button type="button" class="btn mini ghost" data-pignore="${esc(botId)}:${esc(plat.toLowerCase())}" title="이 서버에서 안 쓰는 연결이면 화면·경고·알림에서 숨겨 (되돌릴 수 있어)">숨기기</button>`;
 function linkChip(href, inner, title) {
@@ -657,7 +667,7 @@ function renderHermes() {
       if (!href && p.name === "Telegram")      // 봇 아이디를 모르면 눌러서 알려 주게
         return `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 이 봇의 텔레그램 아이디를 알려 주면, 다음부터 이 칩으로 대화방이 열려">${inner}<span class="go">＋아이디</span></button>` + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
       if (!href && p.name === "Mattermost") return mmSetup(b, inner) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
-      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + tgEdit(b, p.name) + mmClear(b, p.name) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
+      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + mmWeb(b, p.name) + tgEdit(b, p.name) + mmClear(b, p.name) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
     }).join("") || '<span class="empty">연결된 메신저 없음</span>';
     return `<div class="card bot ${b.level}">
       <div class="top"><span class="dot ${b.level}"></span><span class="nm">${esc(b.name)}</span><span class="rl">${esc(b.role || "")}</span>${b.parked ? '<span class="tag" style="color:var(--bad)">parked</span>' : ""}</div>
@@ -1278,7 +1288,7 @@ function renderMobile() {
       return !href && p.name === "Telegram"
         ? `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 봇의 텔레그램 아이디를 알려 줘">${inner}<span class="go">＋아이디</span></button>`
         : (!href && p.name === "Mattermost") ? mmSetup(b, inner)
-        : linkChip(href, inner, `${p.name} 열기`) + tgEdit(b, p.name) + mmClear(b, p.name);
+        : linkChip(href, inner, `${p.name} 열기`) + mmWeb(b, p.name) + tgEdit(b, p.name) + mmClear(b, p.name);
     }).map((c, i) => c + (b.platforms[i].level !== "ok" ? ignoreBtn(b.id, b.platforms[i].name) : "")).join("");
     return `<div class="mi"><div class="av" style="--c:${colors[i % colors.length]}">${esc((b.name || "?")[0])}</div>
       <div class="mid"><div class="nm">${esc(b.name)} <small>${esc(b.role || "")}</small></div>
