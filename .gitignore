@@ -12,5 +12,6 @@ ports_moved.json
 secrets.yaml
 seen.json
 services_extra.json
+services_hidden.json
 watchdog.log
 watchdog.state.json

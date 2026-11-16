@@ -645,7 +645,8 @@ function renderServices() {
     const stateCell = [
       scopeTag || '<span class="tag">system</span>',
       s.optional ? '<span class="tag">선택</span>' : "",
-      s.extra ? `<span class="tag">화면 추가</span><button type="button" class="btn mini ghost" data-rmsvc="${esc(s.name)}" title="목록에서 빼기">빼기</button>` : "",
+      s.extra ? '<span class="tag">화면 추가</span>' : "",
+      hideBtn(s),
       s.restarts ? `<span class="tag" title="재시작 횟수">재시작 ${s.restarts}회</span>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -678,7 +679,7 @@ function renderServices() {
   if (!qBusy) $("notify-body").innerHTML = notifyBody(S.notify);
   // 목록에 없는 서비스 (접힌 카드 · 이름 옆 + 버튼으로 바로 목록에 추가)
   $("others-sum").textContent = `목록에 없는 서비스 ${others.length}개 · 보고 싶은 건 + 로 올려 줘`;
-  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("");
+  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${o.restore ? `<button type="button" class="btn mini" data-hide="${esc(o.restore)}" data-off="1" title="다시 서비스 목록에 올리기">목록+</button>` : addBtn(o.suggest)}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("");
   const newPorts = new Set((S.new_items || []).map((it) => it.port).filter(Boolean));
   const n = S.services.filter((s) => (s.state === "warn" || s.state === "bad") && !s.acked).length + unk.filter((u) => u.exposure === "lan" && !u.acked && !newPorts.has(u.port)).length + live.length + (S.new_items || []).length;
   const bad = S.services.some((s) => s.state === "bad" && !s.acked) || live.length;
@@ -799,7 +800,8 @@ const tg = (attrs, on, label, cls = "") => `<button type="button" class="tg ${cl
 const svcAck = (s) => (s.state === "warn" || s.state === "bad") ? tg(`data-sack="${esc(s.name)}" data-on="${s.acked ? 0 : 1}"`, !!s.acked, "인지", "sm") : "";
 const agentBtn = (a) => a ? `<button type="button" class="btn mini" data-agent='${esc(JSON.stringify(a))}' title="Hermes Agent 서비스로 보여. Agent 탭에 바로 연결">🤖 Agent 등록</button>` : "";
 const portName = (u) => `<b>${esc(u.label || u.proc || "?")}</b> <span class="empty">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}</span>`;
-const moveBtn = (u) => u.exposure === "internal" ? `<button type="button" class="btn mini" data-pmove="${u.port}" title="안전한 내부 포트라 목록에 없는 서비스 칸으로 치워 둬">서비스로 보내기</button>` : "";
+const hideBtn = (s) => s.scope === "remote" ? "" : `<button type="button" class="btn mini ghost" data-hide="${esc(s.name)}" title="서비스 목록에서 치워서 '목록에 없는 서비스' 칸으로 보내 (상태 감시·알림에서도 빠져)">목록외 +</button>`;
+const moveBtn = (u) => u.exposure === "internal" ? `<button type="button" class="btn mini" data-pmove="${u.port}" title="안전한 내부 포트라 목록에 없는 서비스 칸으로 치워 둬">목록외 +</button>` : "";
 const portAck = (u) => u.exposure === "lan" ? tg(`data-pack="${u.port}" data-on="${u.acked ? 0 : 1}"`, !!u.acked, "인지", "sm") : "";
 // 서비스 "관리" 버튼 (systemd 서비스만 — manual/remote는 systemctl로 제어 못 함)
 const scBtn = (s) => (s.scope === "system" || s.scope === "user") ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" title="start/stop/restart/enable/disable">관리</button>` : "";
@@ -813,7 +815,7 @@ const mdet = (k, head, body) => `<details class="mlist" style="padding:8px 14px"
 // 서비스 정렬: 포트 있는 것 먼저(번호 오름차순), 포트 없는 건 아래로 (원래 순서 유지)
 const svcSort = (list) => [...list].sort((a, b) => (a.port ? 0 : 1) - (b.port ? 0 : 1) || ((a.port && b.port) ? a.port - b.port : 0));
 // [목록에 추가] 버튼 / 🆕 줄
-const addBtn = (sg, label = "목록에 추가") => sg ? `<button type="button" class="btn mini" data-add="${esc(JSON.stringify(sg))}" title="서비스 표에 올리기">${label}</button>` : "";
+const addBtn = (sg, label = "목록+") => sg ? `<button type="button" class="btn mini" data-add="${esc(JSON.stringify(sg))}" title="서비스 표에 올리기">${label}</button>` : "";
 function newRows(list) {
   return list.map((it) => {
     const nm = it.kind === "svc" ? it.unit.replace(/\.service$/, "") : `포트 ${it.port}`;
@@ -874,6 +876,14 @@ function failedRows(list) {
 document.addEventListener("click", async (e) => {
   const ad = e.target.closest("[data-add]");
   if (ad) { openAdd(JSON.parse(ad.dataset.add)); return; }
+  const hd = e.target.closest("[data-hide]");
+  if (hd) {
+    const on = !hd.dataset.off;
+    if (on && !confirm(`'${hd.dataset.hide}' 을(를) 서비스 목록에서 치울까?\n(서비스 자체는 안 건드려. 상태 감시·알림에서는 빠지고, '목록에 없는 서비스' 칸에서 [목록+] 로 되돌릴 수 있어)`)) return;
+    hd.disabled = true;
+    try { await postJSON("api/services/hide", {name: hd.dataset.hide, on}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
   const pm = e.target.closest("[data-pmove]");
   if (pm) {
     pm.disabled = true;
@@ -1036,7 +1046,8 @@ function renderMobile() {
     const stLine = [
       `<small>${s.scope === "manual" ? "수동" : s.scope === "remote" ? "원격" : s.scope === "user" ? "user" : "system"}</small>`,
       s.optional ? "<small>선택</small>" : "",
-      s.extra ? `<small>화면 추가</small> <button type="button" class="btn mini ghost" data-rmsvc="${esc(s.name)}">빼기</button>` : "",
+      s.extra ? "<small>화면 추가</small>" : "",
+      hideBtn(s),
       s.restarts ? `<small>재시작 ${s.restarts}회</small>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -1057,7 +1068,7 @@ function renderMobile() {
     ${unk.length ? mdet("unknown", `${unk.some((u) => u.exposure === "lan" && !u.acked) ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개`, unk.map((u) =>
       `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.label || u.proc || "?")}${portAck(u)}</div><div class="sb">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${agentBtn(u.agent)} ${addBtn(u.suggest)} ${moveBtn(u)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
     ${(S.other_services || []).length ? mdet("others", `목록에 없는 서비스 ${(S.other_services || []).length}개 · + 로 목록에 올려 줘`, `<div class="others">${(S.other_services || []).map((o) =>
-      `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("")}</div>`) : ""}`;
+      `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${o.restore ? `<button type="button" class="btn mini" data-hide="${esc(o.restore)}" data-off="1" title="다시 서비스 목록에 올리기">목록+</button>` : addBtn(o.suggest)}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("")}</div>`) : ""}`;
 
   // 탭 바 숫자
   [["hermes", "cnt-hermes"], ["services", "cnt-services"]].forEach(([t, id]) => {

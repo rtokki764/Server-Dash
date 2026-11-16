@@ -74,6 +74,8 @@ EXTRA_FILE = BASE / "services_extra.json"
 # 처음 본 서비스·포트 기록 ("🆕 새로 생긴 것" 판단용)
 SEEN_FILE = BASE / "seen.json"
 EXTRA_LOCK = threading.Lock()
+# 화면에서 [목록외 +]로 목록에서 치운 서비스 이름들 (config.yaml 에 적은 것도 가능, 되돌릴 수 있음)
+HIDDEN_FILE = BASE / "services_hidden.json"
 # 화면에서 [서비스로 보내기]한 내부 전용 포트 (목록에 없는 포트 → 목록에 없는 서비스로 옮김)
 MOVED_FILE = BASE / "ports_moved.json"
 # 화면에서 [Agent 등록]한 Hermes 서비스 (config.yaml 에 hermes 가 없을 때만 채워 줌)
@@ -107,10 +109,17 @@ def _load_agent_extra():
 _load_agent_extra()
 
 
-def all_services():
-    """config.yaml 서비스 + 화면에서 추가한 서비스"""
+def hidden_names():
+    return {str(x) for x in _read_json(HIDDEN_FILE, []) if x}
+
+
+def all_services(include_hidden=False):
+    """config.yaml 서비스 + 화면에서 추가한 서비스 (목록외로 치운 건 빼고)"""
     out = []
+    hid = set() if include_hidden else hidden_names()
     for s in list(CFG.get("services") or []) + [{**s, "extra": True} for s in load_extras()]:
+        if s.get("name") in hid:
+            continue
         s = dict(s)
         s.setdefault("scope", "system")
         if s["scope"] in ("system", "user"):
@@ -730,6 +739,16 @@ def build_services(ports, urlchecks, llama):
         o["suggest"] = suggest_for(o["unit"], o.get("user"))
         o["agent"] = ({"unit": o["unit"], "scope": "user" if o.get("user") else "system"}
                       if agent_candidate(o["unit"], None) else None)
+    # [목록외 +]로 목록에서 치운 서비스도 "목록에 없는 서비스" 칸에 칩으로 보여 줌 ([목록+] 로 되돌리기)
+    for h in all_services(include_hidden=True):
+        if h["name"] not in hidden_names():
+            continue
+        dup = next((o for o in others if h.get("unit") and o.get("unit") == h["unit"]), None)
+        if dup:
+            dup["restore"] = h["name"]
+            continue
+        others.append({"unit": h.get("unit"), "label": h["name"], "port": h.get("port"), "user": h.get("scope") == "user",
+                       "restore": h["name"], "suggest": None, "agent": None})
     # [서비스로 보내기]한 내부 전용 포트는 "목록에 없는 포트"에서 빼서 "목록에 없는 서비스"로 옮김
     moved = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
     keep = []
@@ -751,7 +770,7 @@ def detect_new(unknown, others, now):
     돌려주는 것: (새로 생긴 것 목록, 처리한(추가/넘기기) 이름표 모음)"""
     with EXTRA_LOCK:
         seen = _read_json(SEEN_FILE, {})
-        units = {o["unit"]: o for o in others if o.get("unit")}   # 직접 띄운 프로그램(unit 없음)은 제외
+        units = {o["unit"]: o for o in others if o.get("unit") and not o.get("restore")}   # 직접 띄운 것·치워 둔 서비스는 새것으로 안 침
         lan = {u["port"]: u for u in unknown if u["exposure"] == "lan"}
         if not seen.get("init"):
             seen = {"init": now, "units": {k: now for k in units},
@@ -1147,6 +1166,10 @@ def api_services_add():
     if scope == "manual" and not port:
         return jsonify({"ok": False, "error": "직접 띄운 프로그램은 포트가 있어야 켜졌는지 알 수 있어"}), 400
     with EXTRA_LOCK:
+        if name in hidden_names():                      # 목록외로 치워 둔 서비스면 새로 만들지 않고 되돌림
+            _write_json(HIDDEN_FILE, sorted(hidden_names() - {name}))
+            WAKE.set()
+            return jsonify({"ok": True})
         if any(s["name"] == name for s in all_services()):
             return jsonify({"ok": False, "error": f"'{name}' 은(는) 이미 목록에 있어"}), 400
         entry = {"name": name, "scope": scope, "added": time.time()}
@@ -1210,6 +1233,24 @@ def api_ports_move():
         cur_list = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
         (cur_list.add if on else cur_list.discard)(port)
         _write_json(MOVED_FILE, sorted(cur_list))
+    _slow["ports_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/services/hide")
+def api_services_hide():
+    """목록의 서비스를 '목록에 없는 서비스' 칸으로 치우기(on=true) / 되돌리기(on=false). config.yaml 것도 가능"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    name, on = str(b.get("name") or ""), bool(b.get("on", True))
+    with EXTRA_LOCK:
+        if not any(x["name"] == name for x in all_services(include_hidden=True)):
+            return jsonify({"ok": False, "error": "그런 서비스가 목록에 없어"}), 400
+        cur = hidden_names()
+        (cur.add if on else cur.discard)(name)
+        _write_json(HIDDEN_FILE, sorted(cur))
     _slow["ports_at"] = 0
     WAKE.set()
     return jsonify({"ok": True})
