@@ -443,13 +443,14 @@ function appLink(bot, plat) {
     const host = (!IS_MOBILE && OPEN.at_office && OPEN.server_office) ? OPEN.server_office : OPEN.server;
     return host ? `mattermost://${host}/${OPEN.team}/messages/@${bot.mm_user}` : null;
   }
-  if (plat === "Telegram") return bot.tg_user ? `https://t.me/${bot.tg_user}` : null;
+  // PC: tg:// 로 설치된 텔레그램 앱을 바로 열어 (https 링크는 대시보드 창이 t.me 로 넘어가 버려). 폰: https 링크가 앱으로 열림
+  if (plat === "Telegram") return bot.tg_user ? (IS_MOBILE ? `https://t.me/${bot.tg_user}` : `tg://resolve?domain=${bot.tg_user}`) : null;
   return null;
 }
 // 칩: 링크가 있으면 누를 수 있게 <a>
 const ignoreBtn = (botId, plat) => `<button type="button" class="btn mini ghost" data-pignore="${esc(botId)}:${esc(plat.toLowerCase())}" title="이 서버에서 안 쓰는 연결이면 화면·경고·알림에서 숨겨 (되돌릴 수 있어)">숨기기</button>`;
 function linkChip(href, inner, title) {
-  return href ? `<a class="chip" href="${esc(href)}" title="${esc(title)}">${inner}<span class="go">↗</span></a>` : `<span class="chip">${inner}</span>`;
+  return href ? `<a class="chip" href="${esc(href)}"${/^https?:/.test(href) ? ' target="_blank" rel="noopener noreferrer"' : ""} title="${esc(title)}">${inner}<span class="go">↗</span></a>` : `<span class="chip">${inner}</span>`;
 }
 let S = null, H = [], offset = 0, lastFetch = 0;
 

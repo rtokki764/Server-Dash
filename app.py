@@ -978,6 +978,16 @@ STATE = {"snapshot": None}
 HISTORY = deque(maxlen=int(D.get("history_hours", 6) * 3600 / D.get("sample_seconds", 60)))
 _slow = {"urls": {}, "urls_at": 0, "hermes": None, "hermes_at": 0, "ports": {}, "ports_at": 0}
 LOCK = threading.Lock()
+_EPOCH = {"n": 0}      # 저장·변경이 있을 때마다 +1 (수집 도중에 바뀐 값이 옛 값으로 덮어쓰이는 걸 막는 용도)
+
+
+def _invalidate(*keys):
+    """느리게 읽는 값(hermes / ports)을 바로 다시 읽게 함. 수집이 한창 돌고 있어도 옛 값이 새 값을 덮지 못해"""
+    _EPOCH["n"] += 1
+    for k in keys:
+        _slow[k + "_at"] = 0
+
+
 WAKE = threading.Event()    # 인지함을 누르면 다음 수집을 기다리지 않고 바로 다시 모으게
 
 
@@ -994,11 +1004,15 @@ def collect_once():
         urls.update({r["url"]: check_url(r["url"]) for r in CFG.get("remote", [])})
         _slow.update(urls=urls, urls_at=now)
     if now - _slow["hermes_at"] > 30:
-        _slow.update(hermes=read_hermes(), hermes_at=now)
+        ep, hz = _EPOCH["n"], read_hermes()
+        if ep == _EPOCH["n"]:                       # 읽는 사이에 설정이 바뀌었으면 버리고 다음 수집에서 다시 읽음
+            _slow.update(hermes=hz, hermes_at=now)
 
     # 포트는 자주 안 바뀌고, sudo 기록이 시스템 로그에 쌓이니까 30초마다만 확인
     if now - _slow["ports_at"] > 30:
-        _slow.update(ports=read_ports(), ports_at=now)
+        ep, pz = _EPOCH["n"], read_ports()
+        if ep == _EPOCH["n"]:
+            _slow.update(ports=pz, ports_at=now)
     ports = _slow["ports"]
     services, unknown, others, failed = build_services(ports, _slow["urls"], llama)
 
@@ -1248,7 +1262,7 @@ def api_services_add():
     if b.get("key"):
         mark_handled(str(b["key"]))
     if port:
-        _slow["ports_at"] = 0           # 포트 상태 바로 다시 읽기
+        _invalidate("ports")
     WAKE.set()
     return jsonify({"ok": True})
 
@@ -1270,7 +1284,7 @@ def api_agent_register():
     with EXTRA_LOCK:
         _write_json(AGENT_FILE, data)
         CFG["hermes"] = {**data, **(CFG.get("hermes") or {})}
-    _slow["hermes_at"] = 0
+    _invalidate("hermes")
     WAKE.set()
     return jsonify({"ok": True})
 
@@ -1294,7 +1308,7 @@ def api_ports_move():
         cur_list = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
         (cur_list.add if on else cur_list.discard)(port)
         _write_json(MOVED_FILE, sorted(cur_list))
-    _slow["ports_at"] = 0
+    _invalidate("ports")
     WAKE.set()
     return jsonify({"ok": True})
 
@@ -1323,7 +1337,7 @@ def api_agent_ignore():
         allc = {str(x).lower() for x in (H.get("ignore") or [])}
         (allc.add if on else allc.discard)(key)
         H["ignore"] = sorted(allc)
-    _slow["hermes_at"] = 0
+    _invalidate("hermes")
     WAKE.set()
     return jsonify({"ok": True})
 
@@ -1359,7 +1373,7 @@ def api_agent_bot():
             cur[bid]["telegram"] = tg
         else:
             cur[bid].pop("telegram", None)
-    _slow["hermes_at"] = 0
+    _invalidate("hermes")
     WAKE.set()
     return jsonify({"ok": True})
 
@@ -1377,7 +1391,7 @@ def api_services_hide():
         cur = hidden_names()
         (cur.add if on else cur.discard)(name)
         _write_json(HIDDEN_FILE, sorted(cur))
-    _slow["ports_at"] = 0
+    _invalidate("ports")
     WAKE.set()
     return jsonify({"ok": True})
 
