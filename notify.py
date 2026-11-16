@@ -54,9 +54,47 @@ def _dur(sec):
 def _post_json(url, data, timeout=8):
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST",
-                                 headers={"Content-Type": "application/json", "User-Agent": "bc250-dash"})
+                                 headers={"Content-Type": "application/json", "User-Agent": "server-dash"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status, r.read(2000).decode("utf-8", "replace")
+
+
+# 받을 곳 종류와 입력칸. secret=True 인 칸은 저장 후 화면에 다시 보여주지 않아 (비우면 그대로 둠)
+CHANNEL_TYPES = {
+    "mattermost": {"label": "Mattermost", "fields": [
+        {"key": "webhook_url", "label": "웹훅 주소", "secret": True, "required": True, "ph": "https://mm.example.com/hooks/…"},
+        {"key": "username", "label": "보낸 사람 이름 (선택)", "ph": "서버 이름"},
+        {"key": "channel", "label": "채널 (선택)", "ph": "비우면 웹훅 만들 때 고른 채널"}]},
+    "slack": {"label": "Slack", "fields": [
+        {"key": "webhook_url", "label": "웹훅 주소", "secret": True, "required": True, "ph": "https://hooks.slack.com/services/…"}]},
+    "discord": {"label": "Discord", "fields": [
+        {"key": "webhook_url", "label": "웹훅 주소", "secret": True, "required": True, "ph": "https://discord.com/api/webhooks/…"}]},
+    "telegram": {"label": "Telegram", "fields": [
+        {"key": "bot_token", "label": "봇 토큰", "secret": True, "required": True, "ph": "123456789:AAH…  (@BotFather)"},
+        {"key": "chat_id", "label": "채팅 ID", "required": True, "ph": "봇에게 말 건 뒤 getUpdates 에서 확인한 숫자"}]},
+    "ntfy": {"label": "ntfy (폰 푸시)", "fields": [
+        {"key": "server", "label": "서버 주소", "ph": "https://ntfy.sh (비우면 이걸 씀)"},
+        {"key": "topic", "label": "토픽 이름", "required": True, "ph": "my-server-alerts"},
+        {"key": "token", "label": "액세스 토큰 (선택)", "secret": True, "ph": "tk_…"}]},
+    "webhook": {"label": "일반 웹훅 (직접 만든 곳)", "fields": [
+        {"key": "url", "label": "주소", "secret": True, "required": True, "ph": "https://내서버/알림받는곳"}]},
+}
+LEGACY_IDS = {"mattermost", "telegram"}      # 예전 방식: secrets.yaml 의 mattermost / telegram
+
+
+def _check_url(u):
+    import ipaddress
+    from urllib.parse import urlparse
+    p = urlparse(u)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        raise ValueError("주소는 http:// 또는 https:// 로 시작해야 해")
+    try:
+        if ipaddress.ip_address(p.hostname).is_link_local:
+            raise ValueError("이 주소는 쓸 수 없어 (링크로컬)")
+    except ValueError as e:
+        if "쓸 수 없어" in str(e):
+            raise
+    return u
 
 
 class Notifier:
@@ -251,22 +289,123 @@ class Notifier:
         tmp.write_text(json.dumps(self.state, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.state_file)
 
+    # ── 받을 곳 (여러 개, 종류 선택 가능) ──
+    # 저장: notify_channels.json (화면에서 추가/수정). 예전 secrets.yaml 의 mattermost/telegram 도 그대로 읽어.
+    @property
+    def ch_file(self):
+        return self.base / "notify_channels.json"
+
+    def _ch_store(self):
+        try:
+            d = json.loads(self.ch_file.read_text(encoding="utf-8"))
+        except Exception:
+            d = {}
+        d.setdefault("channels", []); d.setdefault("legacy_off", [])
+        return d
+
+    def _ch_write(self, d):
+        tmp = self.ch_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            tmp.chmod(0o600)                       # 웹훅 주소·토큰이 들어 있으니 나만 읽게
+        except OSError:
+            pass
+        tmp.replace(self.ch_file)
+
+    @staticmethod
+    def _configured(typ, conf):
+        spec = CHANNEL_TYPES.get(typ)
+        return bool(spec) and all(str(conf.get(f["key"]) or "").strip() for f in spec["fields"] if f.get("required"))
+
+    def all_channels(self):
+        """화면용 전체 목록 [{id,type,name,enabled,conf,legacy,ok}] (비밀값 포함 → 밖으로 내보내기 전에 꼭 마스킹)"""
+        st, out = self._ch_store(), []
+        sec = self.secrets()
+        for typ in ("mattermost", "telegram"):                       # 예전 방식
+            conf = sec.get(typ) or {}
+            if self._configured(typ, conf) and (typ != "mattermost" or str(conf.get("webhook_url")).startswith("http")):
+                out.append({"id": typ, "type": typ, "name": CHANNEL_TYPES[typ]["label"], "legacy": True,
+                            "enabled": typ not in st["legacy_off"], "conf": conf, "ok": True})
+        for c in st["channels"]:
+            if c.get("type") in CHANNEL_TYPES:
+                out.append({"id": c["id"], "type": c["type"], "name": c.get("name") or CHANNEL_TYPES[c["type"]]["label"],
+                            "legacy": False, "enabled": bool(c.get("enabled", True)), "conf": c.get("conf") or {},
+                            "ok": self._configured(c["type"], c.get("conf") or {})})
+        return out
+
+    def channels(self):
+        """실제로 보낼 곳만 {id: {type,name,conf}} (켜져 있고 필수 칸이 채워진 것)"""
+        return {c["id"]: c for c in self.all_channels() if c["enabled"] and c["ok"]}
+
+    def channels_public(self):
+        """화면에 보낼 목록: 비밀값은 가리고 '설정됨'만 알려 줌"""
+        res = []
+        for c in self.all_channels():
+            spec = CHANNEL_TYPES[c["type"]]["fields"]
+            vals = {}
+            for f in spec:
+                v = str(c["conf"].get(f["key"]) or "")
+                vals[f["key"]] = ({"set": bool(v), "hint": ("…" + v[-4:]) if v else ""} if f.get("secret") else {"value": v})
+            res.append({"id": c["id"], "type": c["type"], "label": CHANNEL_TYPES[c["type"]]["label"], "name": c["name"],
+                        "enabled": c["enabled"], "legacy": c["legacy"], "ok": c["ok"], "values": vals})
+        return res
+
+    def save_channel(self, data):
+        """받을 곳 추가/수정. 틀리면 ValueError. 수정할 때 비밀칸을 비우면 예전 값 그대로"""
+        typ = str(data.get("type") or "")
+        if typ not in CHANNEL_TYPES:
+            raise ValueError("받을 곳 종류가 이상해")
+        cid = str(data.get("id") or "")
+        with self.lock:
+            st = self._ch_store()
+            if cid in LEGACY_IDS:                                    # secrets.yaml 것은 켜고 끄기만
+                off = set(st["legacy_off"])
+                (off.discard if data.get("enabled", True) else off.add)(cid)
+                st["legacy_off"] = sorted(off)
+                self._ch_write(st)
+                return cid
+            old = next((c for c in st["channels"] if c["id"] == cid), None)
+            if cid and not old:
+                raise ValueError("그런 받을 곳이 없어")
+            conf_in = data.get("conf") or {}
+            conf = {}
+            for f in CHANNEL_TYPES[typ]["fields"]:
+                v = str(conf_in.get(f["key"]) or "").strip()
+                if not v and old and f.get("secret"):
+                    v = str((old.get("conf") or {}).get(f["key"]) or "")
+                if f.get("required") and not v:
+                    raise ValueError(f"'{f['label']}' 를 채워 줘")
+                if v:
+                    conf[f["key"]] = v
+            for k in ("webhook_url", "url", "server"):
+                if conf.get(k):
+                    _check_url(conf[k])
+            name = str(data.get("name") or "").strip()[:40] or CHANNEL_TYPES[typ]["label"]
+            if any(c["name"] == name and c["id"] != cid for c in self.all_channels()):
+                name = f"{name} {len(st['channels']) + 1}"
+            if old:
+                old.update({"type": typ, "name": name, "conf": conf, "enabled": bool(data.get("enabled", old.get("enabled", True)))})
+            else:
+                import secrets as _sec
+                cid = _sec.token_hex(4)
+                st["channels"].append({"id": cid, "type": typ, "name": name, "enabled": True, "conf": conf})
+            self._ch_write(st)
+        return cid
+
+    def delete_channel(self, cid):
+        with self.lock:
+            st = self._ch_store()
+            n = len(st["channels"])
+            st["channels"] = [c for c in st["channels"] if c["id"] != cid]
+            if len(st["channels"]) == n:
+                raise ValueError("secrets.yaml 에 적은 건 화면에서 못 지워 (끄기만 돼)" if cid in LEGACY_IDS else "그런 받을 곳이 없어")
+            self._ch_write(st)
+
     def secrets(self):
         try:
             return yaml.safe_load(self.secrets_file.read_text(encoding="utf-8")) or {}
         except Exception:
             return {}
-
-    def channels(self):
-        """설정이 채워진 받을 곳만 {이름: 설정}"""
-        s, out = self.secrets(), {}
-        mm = s.get("mattermost") or {}
-        if str(mm.get("webhook_url") or "").startswith("http"):
-            out["mattermost"] = mm
-        tg = s.get("telegram") or {}
-        if tg.get("bot_token") and tg.get("chat_id"):
-            out["telegram"] = tg
-        return out
 
     # ── 핵심: 배지 목록을 보고 보낼 것 정하기 ──
     def process(self, badges, acked_ids, now=None):
@@ -389,24 +528,42 @@ class Notifier:
                 "count": len(alerts) + len(resolved)}
 
     # ── 전송 ──
-    def _send_one(self, name, conf, text):
-        if name == "mattermost":
+    def _send_one(self, typ, conf, text):
+        if typ == "mattermost":
             data = {"text": text}
             for k in ("username", "channel", "icon_url"):
                 if conf.get(k):
                     data[k] = conf[k]
             _post_json(conf["webhook_url"], data)
-        elif name == "telegram":
+        elif typ == "slack":
+            _post_json(conf["webhook_url"], {"text": text})
+        elif typ == "discord":
+            _post_json(conf["webhook_url"], {"content": text[:1900]})
+        elif typ == "telegram":
             _post_json(f"https://api.telegram.org/bot{conf['bot_token']}/sendMessage",
                        {"chat_id": conf["chat_id"], "text": text, "disable_web_page_preview": True})
+        elif typ == "ntfy":
+            url = (conf.get("server") or "https://ntfy.sh").rstrip("/") + "/" + conf["topic"]
+            hdr = {"Title": self.title.encode("utf-8").decode("latin-1", "ignore") or "alert", "User-Agent": "server-dash"}
+            if conf.get("token"):
+                hdr["Authorization"] = "Bearer " + conf["token"]
+            req = urllib.request.Request(url, data=text.encode("utf-8"), method="POST", headers=hdr)
+            urllib.request.urlopen(req, timeout=8).read(200)
+        elif typ == "webhook":
+            _post_json(conf["url"], {"text": text, "title": self.title})
+        else:
+            raise ValueError("모르는 받을 곳 종류")
 
-    def send(self, msg):
-        """모든 받을 곳에 보내고 결과 {이름: "ok" 또는 에러} 를 돌려줘. 실패하면 한 번 더 시도."""
+    def send(self, msg, only=None):
+        """켜진 모든 받을 곳(only 가 있으면 그 곳만)에 보내고 결과 {이름: "ok" 또는 에러} 를 돌려줘. 실패하면 한 번 더 시도."""
         results = {}
-        for name, conf in self.channels().items():
+        for cid, ch in self.channels().items():
+            if only and cid != only:
+                continue
+            name = ch["name"]
             for attempt in (1, 2):
                 try:
-                    self._send_one(name, conf, msg["text"])
+                    self._send_one(ch["type"], ch["conf"], msg["text"])
                     results[name] = "ok"
                     break
                 except urllib.error.HTTPError as e:
@@ -418,7 +575,7 @@ class Notifier:
         entry = {"t": time.time(), "kind": msg.get("kind"), "text": msg["text"],
                  "results": results, "ok": bool(results) and all(v == "ok" for v in results.values())}
         if not results:
-            entry["results"] = {"-": "받을 곳 없음 (secrets.yaml)"}
+            entry["results"] = {"-": "받을 곳 없음 (화면의 '받을 곳'에서 추가해 줘)"}
         with self.lock:
             self.state["log"] = (self.state["log"] + [entry])[-10:]
             self._save()
@@ -433,18 +590,17 @@ class Notifier:
             except Exception as e:
                 print("notify error:", repr(e), flush=True)
 
-    def test(self):
+    def test(self, only=None):
         R = self.rules()
         text = (f"🔔 {self.title} 테스트 알림이야. 이게 보이면 연결 성공!\n"
                 f"기준: 빨강 {_dur(R['bad_seconds'])} · 노랑 {_dur(R['warn_seconds'])} 넘게 계속되면 보내고, "
                 f"같은 문제는 {R['cooldown_minutes']}분 동안 다시 안 보내.")
-        return self.send({"text": text, "kind": "test"})
+        return self.send({"text": text, "kind": "test"}, only=only)
 
     # ── 화면용 상태 ──
     def status(self, now=None):
         now = now or time.time()
         R = self.rules()
-        ch = self.channels()
         with self.lock:
             items = []
             quiet, qleft = self.in_quiet(now)
@@ -468,6 +624,6 @@ class Notifier:
             held_n = len(self.state["held"])
         qs = self.quiet_settings()
         return {"quiet": {**qs, "on": qs["enabled"], "now": quiet, "left": round(qleft) if qleft else None, "held": held_n},
-                "enabled": self.enabled, "channels": {"mattermost": "mattermost" in ch, "telegram": "telegram" in ch},
+                "enabled": self.enabled, "channels": self.channels_public(), "channel_types": CHANNEL_TYPES,
                 "rules": R, "items": sorted(items, key=lambda x: x["since"]), "log": log[::-1],
                 "mute": self._c("mute", None) or [], "link": self._c("link", None) or ""}

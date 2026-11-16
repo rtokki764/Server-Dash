@@ -6,6 +6,7 @@ __pycache__/
 ack.json
 agent_extra.json
 config.yaml
+notify_channels.json
 notify_settings.json
 notify_state.json
 ports_moved.json

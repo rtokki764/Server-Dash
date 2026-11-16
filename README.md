@@ -1,7 +1,7 @@
 # Server-Dash
 
 리눅스(systemd) 서버의 상태를 한 화면에서 보는 가벼운 웹 대시보드야.
-CPU·메모리·디스크·온도, 서비스 상태, 열린 포트를 보여주고, 문제가 생기면 Mattermost / Telegram 으로 알려줘.
+CPU·메모리·디스크·온도, 서비스 상태, 열린 포트를 보여주고, 문제가 생기면 Mattermost · Slack · Discord · Telegram · ntfy(폰 푸시) · 직접 만든 웹훅 중 원하는 곳으로 알려줘.
 서비스 줄의 **[관리]** 버튼으로 `start / stop / restart / enable / disable` 도 할 수 있어.
 
 - Python + Flask 한 개짜리 앱 (DB 없음)
@@ -128,7 +128,11 @@ services:
 - 경고 기준은 `thresholds:` 로 바꿀 수 있어 (기본: 메모리 85/95%, 디스크 80/90% 등)
 - `dashboard.title` 을 비워 두면 hostname 이 제목이야
 
-알림 받을 곳(웹훅 주소·토큰)은 `config.yaml` 이 아니라 **`secrets.yaml`** 에 적어 (`secrets.example.yaml` 참고).
+알림 받을 곳(웹훅 주소·토큰)은 `config.yaml` 에 적지 않아. **대시보드 🔔 알림 칸 → 받을 곳 → [+ 받을 곳 추가]** 에서 종류(Mattermost / Slack / Discord / Telegram / ntfy / 일반 웹훅)를 고르고 주소를 붙여넣으면 끝이야.
+- 여러 개 추가할 수 있고, 하나씩 켜고 끄기·**테스트**·수정·삭제가 돼. 저장하면 바로 적용 (재시작 X)
+- 주소·토큰은 서버의 `notify_channels.json` 에만 저장되고(나만 읽게 600 권한, 깃에는 안 올라감) 화면에 다시 보여 주지 않아
+- 주소·토큰은 **HTTPS 로 접속했거나 서버 자기 자신(localhost)에서 볼 때만** 저장돼
+- 예전 방식(`secrets.yaml` 에 mattermost / telegram 적기)도 그대로 읽어. 화면에는 "secrets.yaml" 표시로 나오고 끄기만 할 수 있어
 
 ## 서비스 제어 (관리 버튼)
 
@@ -168,7 +172,7 @@ app.register_blueprint(make_service_control(get_services, cfg))
 | `templates/index.html` | 화면 (PC·모바일) |
 | `service_control.py`, `static/service_control.js` | 서비스 제어 API 와 dialog |
 | `notify.py` | Mattermost / Telegram 알림 |
-| `config.example.yaml`, `secrets.example.yaml` | 설정 예시 |
+| `config.example.yaml`, `secrets.example.yaml` | 설정 예시 (`secrets.yaml` 은 옛 방식이라 선택) |
 | `install.sh` | 설치·업데이트 스크립트 |
 | `VERSION` | 현재 버전 (화면 아래에 표시) |
 | `demo.py` | 가짜 데이터로 화면만 확인 (`BC250_DEMO=1 python app.py`) |

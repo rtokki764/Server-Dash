@@ -21,7 +21,7 @@ control:
   lock_seconds: 300
 
 notify:
-  enabled: false         # 웹훅(Mattermost/Telegram)을 쓰려면 true + secrets.yaml 작성
+  enabled: false         # 알림을 쓰려면 true (또는 화면 🔔 칸에서 켜기) + 화면에서 '받을 곳' 추가
   # 아래 값은 전부 대시보드 화면 🔔 알림 칸에서 바로 바꿀 수 있어 (화면에서 바꾼 값이 이 파일보다 우선).
   # bad_seconds: 60          # 빨강이 이만큼(초) 넘게 계속되면 보냄
   # warn_seconds: 600        # 노랑이 이만큼(초) 넘게 계속되면 보냄

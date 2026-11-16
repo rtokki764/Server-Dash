@@ -25,7 +25,7 @@ import yaml
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from notify import Notifier
-from service_control import make_service_control
+from service_control import make_service_control, _secure_enough
 
 BASE = Path(__file__).resolve().parent
 CFG = yaml.safe_load((BASE / "config.yaml").read_text(encoding="utf-8"))
@@ -1286,14 +1286,35 @@ def api_services_skip():
 
 @app.post("/api/notify/test")
 def api_notify_test():
-    """[테스트 알림 보내기] 버튼. secrets.yaml 을 새로 읽어서 바로 보내 봄"""
+    """[테스트 알림 보내기] 버튼. 받을 곳 하나(id)만, 또는 전부 바로 보내 봄"""
     if not request.is_json:
         return jsonify({"ok": False, "error": "json only"}), 415
-    if not NOTIFY.channels():
-        return jsonify({"ok": False, "error": "secrets.yaml 에 받을 곳(웹훅 주소/봇 토큰)이 아직 없어"}), 400
-    entry = NOTIFY.test()
+    only = str((request.get_json(silent=True) or {}).get("id") or "") or None
+    if not NOTIFY.channels() or (only and only not in NOTIFY.channels()):
+        return jsonify({"ok": False, "error": "보낼 수 있는 받을 곳이 없어 (추가했는지, 켜져 있는지 확인해 줘)"}), 400
+    entry = NOTIFY.test(only)
     WAKE.set()
     return jsonify({"ok": entry["ok"], "results": entry["results"]})
+
+
+@app.post("/api/notify/channel")
+def api_notify_channel():
+    """받을 곳 추가/수정/삭제 (action: save | delete). 웹훅 주소·토큰이 오가니까 HTTPS(또는 localhost)에서만"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    if not _secure_enough():
+        return jsonify({"ok": False, "error": "웹훅 주소나 토큰은 HTTPS(또는 서버 자기 자신)에서만 저장할 수 있어"}), 400
+    b = request.get_json(silent=True) or {}
+    try:
+        if b.get("action") == "delete":
+            NOTIFY.delete_channel(str(b.get("id") or ""))
+            cid = None
+        else:
+            cid = NOTIFY.save_channel(b)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    WAKE.set()
+    return jsonify({"ok": True, "id": cid})
 
 
 @app.post("/api/notify/settings")
