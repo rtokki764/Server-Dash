@@ -316,6 +316,7 @@ def read_hardware():
     gtt_u, gtt_t = read_num(SENS.get("gtt_used")), read_num(SENS.get("gtt_total"))
     return {
         "cpu_pct": psutil.cpu_percent(interval=None),
+        "cpu_threads": psutil.cpu_count(logical=True),
         "gpu_pct": read_num(SENS.get("gpu_busy")) if read_num(SENS.get("gpu_busy")) is not None else gpu_busy_fdinfo(),
         "gpu_mhz": gpu_clock_mhz(),
         "apu_temp": _hw("apu_temp"),
@@ -558,12 +559,19 @@ def read_hermes_state():
         m = meta.get(prof, {})
         pl = plats.get(prof, [])
         a = acts.get(prof, {})
-        level = "bad" if prof in parked else max((p["level"] for p in pl), key=["ok", "warn", "bad"].index, default="ok")
+        level = "bad" if prof in parked else max((p["level"] for p in pl), key=["ok", "warn", "bad"].index, default="off")
         out["bots"].append({"id": prof, "name": m.get("name", prof), "role": m.get("role"),
                             "mm_user": m.get("mattermost"), "tg_user": str(m.get("telegram") or "").lstrip("@") or None,
                             "parked": prof in parked, "level": level, "platforms": pl,
                             "last": a.get("last"), "model": a.get("model"), "today": a.get("today", 0)})
     return out
+
+
+def _agent_cfg():
+    """Agent 탭 화면용: 이 서버에 어떤 부가 기능(MCP 감시·자동 복구)이 설정돼 있는지"""
+    H, W = CFG.get("hermes") or {}, CFG.get("watchdog") or {}
+    return {"unit": H.get("unit"), "mcp_name": W.get("mcp_name"), "mcp_logged": bool(H.get("mcp_pattern")),
+            "watchdog": bool(W and H.get("unit")), "parked_minutes": W.get("parked_minutes", 10)}
 
 
 def read_hermes():
@@ -600,7 +608,7 @@ def read_hermes():
                 st = "bad" if st == "bad" else "warn"
         else:
             errs = [m for _, m in pl if re.search(r"\b(ERROR|CRITICAL)\b", m)]
-            st = "warn" if errs else "ok"
+            st = "warn" if errs else ("ok" if pl else "unknown")      # 로그가 하나도 없으면 "정상"이라고 못 함
         platforms.append({"name": p["name"], "state": st, "fails_1h": fails_1h,
                           "last": last[0] if last else None})
 
@@ -692,7 +700,7 @@ def build_services(ports, urlchecks, llama):
         else:
             exposure = None
         rows.append({
-            "name": s["name"], "scope": s.get("scope"), "port": port,
+            "name": s["name"], "unit": s.get("unit"), "scope": s.get("scope"), "port": port,
             "model": s.get("model"), "used_by": s.get("used_by"), "note": s.get("note"),
             "subdomain": s.get("subdomain"), "access": s.get("access"),
             "exposure": exposure, "listening": p is not None if port else None,
@@ -1014,6 +1022,7 @@ def collect_once():
     snap = {
         "server_time": now, "boot_time": psutil.boot_time(), "hostname": socket.gethostname(), "ip": primary_ip(),
         "agent_enabled": bool((CFG.get("hermes") or {}).get("unit")),
+        "agent_cfg": _agent_cfg(),
         "overall": overall, "badges": badges, "hw": hw, "llama": llama,
         "services": services, "unknown_ports": unknown, "other_services": others,
         "failed": failed, "new_items": new_items, "acked": acked, "acked_count": len(acked), "metric_acks": macks, "hermes": hz,

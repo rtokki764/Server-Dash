@@ -118,7 +118,9 @@ services:
 ```
 
 - `scope: user` 는 `systemctl --user` 서비스, `manual` 은 systemd 가 아닌 프로그램(포트로만 확인)
+- 이 서버에서 못 읽는 값(GPU·APU 온도·전력·팬 등)은 "—" 로 채우지 않고 **칸 자체를 숨겨**. 없는 걸 있는 것처럼 보여 주지 않아
 - 센서: AMD APU/GPU(BC250 등)는 `sensors:` 를 안 적어도 **자동으로 찾아** (APU·GPU 온도, 전력 등). 칩이 다르면 `sensors:` 로 덮어써
+- **Agent 탭**의 "MCP 서버" 줄과 "자동 복구" 줄은 `config.yaml` 에 `watchdog:`(mcp_name 등)을 적은 서버에서만 나와. 안 적으면 그 줄은 아예 안 보여 (가짜로 "연결됨"을 띄우지 않아).
 - **Agent 탭**은 Hermes Agent 를 돌리는 서버에서만 나와. `config.yaml` 에 `hermes:` (unit 포함)를 적어야 켜져 — `config.example.yaml` 맨 아래 예시 참고
 - 화면의 **목록에 없는 포트**에는 서비스 이름(systemd 서비스면 그 이름, 아니면 프로그램 이름)이 나와. Hermes 서비스로 보이면 **[🤖 Agent 등록]** 버튼이 떠서, 누르면 설정 파일 수정 없이 바로 Agent 탭에 연결돼 (`agent_extra.json` 에 저장)
 - 버튼은 두 가지만 기억하면 돼. **목록+** = 서비스 목록에 올리기, **목록외 +** = 목록에서 치워서 "목록에 없는 서비스" 칸으로 보내기

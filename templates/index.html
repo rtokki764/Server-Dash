@@ -526,38 +526,43 @@ function renderOverview() {
       ${pct != null ? `<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}
     </div>`;
   $("tiles").innerHTML = [
-    tile("GPU", f0(h.gpu_pct), "%", h.gen_tps ? `생성 ${f1(h.gen_tps)} tok/s` : (h.gpu_mhz != null ? `클럭 ${f0(h.gpu_mhz)} MHz` : "—"), h.gpu_pct, "ok"),
-    tile("CPU", f0(h.cpu_pct), "%", "16스레드 평균", h.cpu_pct, "ok"),
-    tile("APU 온도", f1(h.apu_temp), "°C", `한계 ${T.apu_temp_c.bad}°C`, h.apu_temp != null ? h.apu_temp / T.apu_temp_c.bad * 100 : null, lvl(h.apu_temp, T.apu_temp_c)),
+    h.gpu_pct != null ? tile("GPU", f0(h.gpu_pct), "%", h.gen_tps ? `생성 ${f1(h.gen_tps)} tok/s` : (h.gpu_mhz != null ? `클럭 ${f0(h.gpu_mhz)} MHz` : "—"), h.gpu_pct, "ok") : "",
+    tile("CPU", f0(h.cpu_pct), "%", h.cpu_threads ? `${h.cpu_threads}스레드 평균` : "평균", h.cpu_pct, "ok"),
+    h.apu_temp != null ? tile("APU 온도", f1(h.apu_temp), "°C", `한계 ${T.apu_temp_c.bad}°C`, h.apu_temp / T.apu_temp_c.bad * 100, lvl(h.apu_temp, T.apu_temp_c)) : "",
     tile("메모리", f1(h.mem_used), "GB", `${f1(h.mem_total)} GB 중 ${f0(h.mem_pct)}%`, h.mem_pct, mlv("mem_pct", lvl(h.mem_pct, T.mem_pct)), ackBtn("mem_pct", lvl(h.mem_pct, T.mem_pct))),
     tile("스왑", f1(h.swap_used), "GB", `${f1(h.swap_total)} GB 중 ${f0(h.swap_pct)}%`, h.swap_pct, mlv("swap_pct", lvl(h.swap_pct, T.swap_pct)), ackBtn("swap_pct", lvl(h.swap_pct, T.swap_pct))),
     tile("디스크", f0(h.disk_used), "GB", `${f0(h.disk_total)} GB 중 ${f0(h.disk_pct)}%`, h.disk_pct, mlv("disk_pct", lvl(h.disk_pct, T.disk_pct)), ackBtn("disk_pct", lvl(h.disk_pct, T.disk_pct))),
   ].join("");
   const vram = h.vram_used != null ? `<b>${f1(h.vram_used)}</b> / ${f1(h.vram_total)} GB` : "—";
   const gtt = h.gtt_used != null ? `<b>${f1(h.gtt_used)}</b> / ${f1(h.gtt_total)} GB` : "—";
+  // 이 서버에서 못 읽는 센서는 "—" 로 채우지 않고 아예 뺌
   $("strip").innerHTML = [
-    `APU 전력 <b>${f1(h.apu_power)}</b> W`, `GPU 온도 <b>${f1(h.gpu_temp)}</b>°C`, `GPU 클럭 <b>${f0(h.gpu_mhz)}</b> MHz`,
-    `펌프 팬 <b>${f0(h.pump_rpm)}</b> RPM`, `VRAM ${vram}`, `GTT ${gtt}`,
-  ].map((x) => `<span>${x}</span>`).join("");
+    h.apu_power != null && `APU 전력 <b>${f1(h.apu_power)}</b> W`, h.gpu_temp != null && `GPU 온도 <b>${f1(h.gpu_temp)}</b>°C`,
+    h.gpu_mhz != null && `GPU 클럭 <b>${f0(h.gpu_mhz)}</b> MHz`, h.pump_rpm != null && `펌프 팬 <b>${f0(h.pump_rpm)}</b> RPM`,
+    h.vram_used != null && `VRAM ${vram}`, h.gtt_used != null && `GTT ${gtt}`,
+  ].filter(Boolean).map((x) => `<span>${x}</span>`).join("");
   drawCharts();
 }
 
 // ── 그래프 (SVG 직접 그리기) ──
 const CHARTS = [
-  {key: "gpu_pct", title: "GPU", unit: "%", min: 0, max: 100},
+  {key: "gpu_pct", title: "GPU", unit: "%", min: 0, max: 100, optional: true},
   {key: "cpu_pct", title: "CPU", unit: "%", min: 0, max: 100},
-  {key: "apu_temp", title: "APU 온도", unit: "°C", min: 30, max: 100, ref: () => S?.thresholds.apu_temp_c.bad},
+  {key: "apu_temp", title: "APU 온도", unit: "°C", min: 30, max: 100, optional: true, ref: () => S?.thresholds.apu_temp_c.bad},
   {key: "mem_pct", title: "메모리", unit: "%", min: 0, max: 100},
   {key: "swap_pct", title: "스왑", unit: "%", min: 0, max: 100, ref: () => S?.thresholds.swap_pct.bad},
-  {key: "apu_power", title: "APU 전력", unit: "W", min: 0, max: null},
+  {key: "apu_power", title: "APU 전력", unit: "W", min: 0, max: null, optional: true},
 ];
 function drawCharts() {
   const box = $("charts");
   if ($("tab-overview").hidden) return;
-  if (!box.children.length) {
-    box.innerHTML = CHARTS.map((c) => `<div class="card chart"><h3>${c.title} <span id="cv-${c.key}"></span></h3><div class="plot" id="pl-${c.key}"></div></div>`).join("");
+  const have = CHARTS.filter((c) => !c.optional || H.some((p) => p[c.key] != null));
+  const sig = have.map((c) => c.key).join();
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    box.innerHTML = have.map((c) => `<div class="card chart"><h3>${c.title} <span id="cv-${c.key}"></span></h3><div class="plot" id="pl-${c.key}"></div></div>`).join("");
   }
-  CHARTS.forEach((c) => line($("pl-" + c.key), c));
+  have.forEach((c) => line($("pl-" + c.key), c));
 }
 function line(el, c) {
   const pts = H.filter((p) => p[c.key] != null).map((p) => [p.t, p[c.key]]);
@@ -604,11 +609,13 @@ window.addEventListener("resize", () => { clearTimeout(window._rz); window._rz =
 // ── Hermes ──
 function renderHermes() {
   const hz = S.hermes || {};
-  const gw = S.services.filter((s) => ["hermes-gateway", "hermes-serve", "mcphub"].includes(s.name));
+  const ac = S.agent_cfg || {};
+  // 게이트웨이 줄: 등록한 Agent 서비스(+ 예전부터 쓰던 이름들)만
+  const gw = S.services.filter((s) => (ac.unit && s.unit === ac.unit) || ["hermes-gateway", "hermes-serve", "mcphub"].includes(s.name));
   const chip = (st, name, small = "") => `<span class="chip"><span class="dot ${st}"></span>${esc(name)}${small ? ` <small>${esc(small)}</small>` : ""}</span>`;
   const logPlat = Object.fromEntries((hz.platforms || []).map((p) => [p.name, p]));
-  const plat = (hz.platforms || []).map((p) => chip(p.state, p.name,
-    p.state === "ok" ? (p.fails_1h ? `재연결 ${p.fails_1h}회/시간` : "정상") : `${p.state === "bad" ? "끊김" : "불안정"} · 최근 1시간 재연결 ${p.fails_1h}회`));
+  const plat = (hz.platforms || []).map((p) => p.state === "unknown" ? chip("off", p.name, "기록 없음") : chip(p.state, p.name,
+    p.state === "ok" ? (p.fails_1h ? `재연결 ${p.fails_1h}회/시간` : (p.last ? "정상" : "이상 기록 없음")) : `${p.state === "bad" ? "끊김" : "불안정"} · 최근 1시간 재연결 ${p.fails_1h}회`));
   // 봇 카드 (gateway_state.json + state.db)
   const bots = hz.bots || [];
   $("bots").innerHTML = bots.map((b) => {
@@ -626,18 +633,21 @@ function renderHermes() {
       <div class="chips">${pl}</div></div>`;
   }).join("");
   const wdl = (hz.watchdog || []).slice(-1)[0];
-  const wd = wdl ? `<div class="sub">🔧 자동 복구 · ${esc(ago(wdl.t))} · ${esc(wdl.msg)}</div>` : `<div class="sub">🔧 자동 복구 대기 중 (10분 넘게 끊기면 hermes-gateway 재시작)</div>`;
+  const unitName = (ac.unit || "").replace(/\.service$/, "") || "게이트웨이";
+  // 자동 복구 줄은 watchdog 설정이 있는 서버에서만
+  const wd = !ac.watchdog ? "" : wdl ? `<div class="sub">🔧 자동 복구 · ${esc(ago(wdl.t))} · ${esc(wdl.msg)}</div>`
+    : `<div class="sub">🔧 자동 복구 대기 중 (${ac.parked_minutes}분 넘게 끊기면 ${esc(unitName)} 재시작)</div>`;
   const gwInfo = hz.gateway ? `응답 ${ago(hz.gateway.heartbeat)} · v${esc(hz.gateway.version || "?")} · 처리 중 ${hz.gateway.active_agents ?? 0}` : "";
   const mcp = (hz.mcp || []).map((m) => chip(m.level, m.name, m.state === "connected" ? "연결됨" : `${m.state} · ${hm(m.at)}부터`));
   const grp = (hz.groups || []).sort((a, b) => b.count - a.count).map((g) => chip("warn", g.label, `${g.count}회 · 마지막 ${hm(g.last)}`));
   $("hermes-rows").innerHTML = `
-    <div class="row"><div class="k">게이트웨이</div><div><div class="chips">${gw.map((s) => chip(s.state, s.name, s.since ? dur(Date.now() / 1000 + offset - s.since) : "")).join("")}</div>${gwInfo ? `<div class="sub">${gwInfo}</div>` : ""}</div></div>
+    <div class="row"><div class="k">게이트웨이</div><div><div class="chips">${gw.map((s) => chip(s.state, s.name, s.since ? dur(Date.now() / 1000 + offset - s.since) : "")).join("") || (hz.gateway ? chip(/run|connect|ok|active/i.test(hz.gateway.state || "") ? "ok" : "warn", unitName, hz.gateway.state || "") : '<span class="empty">기록 없음</span>')}</div>${gwInfo ? `<div class="sub">${gwInfo}</div>` : ""}</div></div>
     ${bots.length ? "" : `<div class="row"><div class="k">메신저 연결</div><div class="chips">${plat.join("") || '<span class="empty">기록 없음</span>'}</div></div>`}
-    <div class="row"><div class="k">MCP 서버</div><div><div class="chips">${mcp.join("") || chip("ok", "mypc", "연결됨")}</div>${wd}</div></div>
+    ${mcp.length || ac.mcp_name || ac.mcp_logged ? `<div class="row"><div class="k">MCP 서버</div><div><div class="chips">${mcp.join("") || (ac.mcp_name ? chip("ok", ac.mcp_name, "이상 기록 없음") : '<span class="empty">기록 없음</span>')}</div>${wd}</div></div>` : ""}
     <div class="row"><div class="k">최근 ${hz.window_h || 6}시간 경고</div><div class="chips">${grp.join("") || '<span class="empty">경고 없음</span>'}</div></div>`;
   $("hermes-log").innerHTML = (hz.tail || []).slice().reverse().map((l) =>
     `<div class="${esc(l.level)}"><span class="t">${hms(l.t)}</span>${esc(l.msg)}</div>`).join("") || '<span class="empty">로그 없음</span>';
-  const n = (hz.platforms || []).filter((p) => p.state !== "ok").length + (hz.mcp || []).filter((m) => m.level !== "ok").length + bots.filter((b) => b.level !== "ok").length;
+  const n = (hz.platforms || []).filter((p) => p.state !== "ok" && p.state !== "unknown").length + (hz.mcp || []).filter((m) => m.level !== "ok").length + bots.filter((b) => b.level !== "ok" && b.level !== "off").length;
   const bad = (hz.platforms || []).some((p) => p.state === "bad") || (hz.mcp || []).some((m) => m.level === "bad") || bots.some((b) => b.level === "bad");
   $("cnt-hermes").hidden = !n; $("cnt-hermes").textContent = n; $("cnt-hermes").className = "cnt" + (bad ? " bad" : "");
 }
@@ -772,6 +782,7 @@ function notifyHead(n) {
   if (!n) return "";
   const R = n.rules, m = (x) => x >= 60 ? `${Math.round(x / 60)}분` : `${x}초`;
   const q = n.quiet || {};
+  if (n.enabled && !(n.channels || []).some((c) => c.enabled && c.ok)) return "받을 곳이 없어서 안 보내는 중 · 아래에서 받을 곳을 추가해 줘";
   return n.enabled ? `빨강 ${m(R.bad_seconds)} · 노랑 ${m(R.warn_seconds)} 넘게 계속되면 보냄 · 같은 문제 ${R.cooldown_minutes}분 쿨다운 · 인지한 건 안 보냄${q.on ? ` · 🌙 ${q.start}~${q.end}` : ""}`
     : "꺼짐 · 아래 알림 규칙에서 켤 수 있어";
 }
@@ -1100,13 +1111,13 @@ function renderMobile() {
     : `<div class="malert ok">✓ 모든 상태 정상</div>`;
   // 개요: 값 + 미니 그래프 한 줄
   const rows = [
-    {key: "gpu_pct", lb: "GPU", v: f0(h.gpu_pct), u: "%", lv: "ok"},
+    {key: "gpu_pct", lb: "GPU", v: f0(h.gpu_pct), u: "%", lv: "ok", skip: h.gpu_pct == null},
     {key: "cpu_pct", lb: "CPU", v: f0(h.cpu_pct), u: "%", lv: "ok"},
-    {key: "apu_temp", lb: "APU 온도", v: f0(h.apu_temp), u: "°C", lv: lvl(h.apu_temp, T.apu_temp_c)},
+    {key: "apu_temp", lb: "APU 온도", v: f0(h.apu_temp), u: "°C", lv: lvl(h.apu_temp, T.apu_temp_c), skip: h.apu_temp == null},
     {key: "mem_pct", lb: "메모리", v: f0(h.mem_pct), u: "%", lv: (S.metric_acks || {}).mem_pct ? "acked" : lvl(h.mem_pct, T.mem_pct)},
     {key: "swap_pct", lb: "스왑", v: f0(h.swap_pct), u: "%", lv: (S.metric_acks || {}).swap_pct ? "acked" : lvl(h.swap_pct, T.swap_pct)},
-    {key: "apu_power", lb: "전력", v: f0(h.apu_power), u: "W", lv: "ok"},
-  ];
+    {key: "apu_power", lb: "전력", v: f0(h.apu_power), u: "W", lv: "ok", skip: h.apu_power == null},
+  ].filter((r) => !r.skip);
   $("m-rows").innerHTML = rows.map((r) => `
     <div class="mr ${r.lv}" data-k="${r.key}"><span class="lb">${r.lb}</span><span class="vl num">${r.v}<small>${r.u}</small></span>${spark(r.key, null, r.lv)}</div>
     <div class="mx ${mOpen.has(r.key) ? "open" : ""}"><div class="plot" id="mpl-${r.key}"></div></div>`).join("") + `
@@ -1118,9 +1129,9 @@ function renderMobile() {
   mOpen.forEach((k) => { const c = CHARTS.find((x) => x.key === k); const el = $("mpl-" + k); if (c && el) line(el, c); });
   $("m-facts").innerHTML = [
     ["메모리", `${f1(h.mem_used)} / ${f1(h.mem_total)} GB`], ["스왑", `${f1(h.swap_used)} / ${f1(h.swap_total)} GB`],
-    ["GPU 클럭", `${f0(h.gpu_mhz)} MHz`], ["GPU 온도", `${f1(h.gpu_temp)}°C`],
-    ["GTT", h.gtt_used != null ? `${f1(h.gtt_used)} / ${f1(h.gtt_total)} GB` : "—"], ["펌프 팬", `${f0(h.pump_rpm)} RPM`],
-  ].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+    h.gpu_mhz != null && ["GPU 클럭", `${f0(h.gpu_mhz)} MHz`], h.gpu_temp != null && ["GPU 온도", `${f1(h.gpu_temp)}°C`],
+    h.gtt_used != null && ["GTT", `${f1(h.gtt_used)} / ${f1(h.gtt_total)} GB`], h.pump_rpm != null && ["펌프 팬", `${f0(h.pump_rpm)} RPM`],
+  ].filter(Boolean).map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
 
   // 봇
   const hz = S.hermes || {};
