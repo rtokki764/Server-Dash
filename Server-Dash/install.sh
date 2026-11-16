@@ -6,6 +6,8 @@ set -e
 cd "$(dirname "$0")"
 DIR="$(pwd)"                     # 설치 위치는 어디든 상관없음 (서비스 파일에 이 경로가 들어감)
 PY="$(command -v python3 || command -v python || true)"
+VER="$(cat VERSION 2>/dev/null || echo "?")"
+echo "═══ Server-Dash v$VER 설치/업데이트 시작 ($DIR) ═══"
 
 echo "⓪ 필요한 것 확인"
 [ -n "$PY" ] || { echo "✗ python3 가 없어. 먼저 설치해 줘 (예: sudo apt install -y python3 python3-venv)"; exit 1; }
@@ -17,7 +19,7 @@ fi
 
 echo "① 파이썬 가상환경 만들고 라이브러리 설치"
 "$PY" -m venv .venv
-.venv/bin/pip install -q -r requirements.txt
+.venv/bin/pip install -q --disable-pip-version-check -r requirements.txt
 
 echo "①-2 설정 파일 준비 (config.yaml 이 없을 때만 예시로 만듦)"
 if [ ! -f config.yaml ]; then
@@ -66,4 +68,5 @@ sleep 3
 PORT="$(.venv/bin/python -c "import yaml; c=yaml.safe_load(open('config.yaml',encoding='utf-8')) or {}; print((c.get('dashboard') or {}).get('port',5070))")"
 systemctl --user --no-pager status bc250-dash.service | head -5
 curl -s -o /dev/null -w "API 응답 코드: %{http_code}\n" "http://127.0.0.1:$PORT/api/status"
+echo "═══ Server-Dash v$VER 설치 완료 ═══  (브라우저에서 Ctrl+F5 한 뒤 맨 아래 푸터가 v$VER 인지 확인해 줘)"
 echo "끝! 브라우저에서 http://127.0.0.1:$PORT 로 열어 봐 (밖에서 보려면 터널/리버스 프록시를 연결하고, 꼭 로그인 보호를 걸어 줘)"
