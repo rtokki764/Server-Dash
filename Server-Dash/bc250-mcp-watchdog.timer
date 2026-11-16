@@ -1,0 +1,9 @@
+[Unit]
+Description=mypc MCP 자동 복구를 5분마다 실행
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

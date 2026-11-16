@@ -1,0 +1,47 @@
+# ==========================================================
+#  서버 대시보드 최소 설정 (처음 설치할 때 이 파일이 config.yaml 로 복사돼)
+#  - 아래 services 목록만 내 서버에 맞게 고치면 바로 쓸 수 있어
+#  - 센서·hermes·watchdog 같은 건 없어도 돼 (없으면 그 부분만 조용히 빠짐)
+#  - 들여쓰기(스페이스 2칸)가 틀리면 에러가 나니까 조심!
+# ==========================================================
+
+dashboard:
+  title: ""              # 비워 두면 서버 hostname 이 제목이 돼
+  version: "1.12.1"
+  host: 127.0.0.1        # 자기 자신만 접속 가능 (밖에서 보려면 터널/리버스 프록시 + 로그인 보호)
+  port: 5070
+  refresh_seconds: 5
+  history_hours: 6
+  sample_seconds: 60
+  ack_metric_hours: 24
+
+# 서비스 제어 버튼 (start/stop/restart/enable/disable). 로그인 보호 없이 인터넷에 열 거면 false!
+control:
+  enabled: true
+  max_password_fails: 3
+  lock_seconds: 300
+
+notify:
+  enabled: false         # 웹훅(Mattermost/Telegram)을 쓰려면 true + secrets.yaml 작성
+
+# 경고 기준 (생략하면 기본값: 메모리 85/95%, 스왑 70/90%, 디스크 80/90%, 온도 80/90°C)
+# thresholds:
+#   mem_pct: { warn: 85, bad: 95 }
+
+# 온도·GPU 센서 (있는 서버만). sensors 명령에 나오는 칩 이름과 라벨을 적어 줘
+# sensors:
+#   apu_temp: { chip: k10temp, label: Tctl }
+#   gpu_temp: { chip: amdgpu,  label: edge }
+
+# 화면 위에 고정해서 볼 서비스
+#   scope: system(기본) / user(--user) / manual(systemd 아님, port 로만 확인)
+#   unit 을 생략하면 <name>.service 로 봐
+services:
+  - name: sshd
+    unit: sshd.service      # 배포판에 따라 ssh.service 일 수 있어
+    scope: system
+    port: 22
+
+known_processes: []
+hidden_units: []
+remote: []
