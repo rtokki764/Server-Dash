@@ -659,8 +659,8 @@ function renderServices() {
   $("unknown-sum").textContent = `${unkLan ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개${unkLan ? " · 알고 있는 포트면 인지 켜기" : unk.some((u) => u.acked) ? " · 사내망 포트는 인지함" : " · 전부 내부 전용이라 안전"}`;
   $("unknown-body").innerHTML = `<table class="tbl"><tbody>${unk.map((u) => `<tr><td class="port">${u.port}</td>
       <td><span class="exp ${u.exposure}">${icon[u.exposure]} ${word[u.exposure]}</span></td>
-      <td>${esc(u.proc || "?")} <span class="empty">pid ${u.pid ?? "?"}</span>${u.acked ? ' <span class="ackt">인지됨</span>' : ""}</td>
-      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${addBtn(u.suggest)}${portAck(u)}</span></td></tr>`).join("")}</tbody></table>`;
+      <td>${portName(u)}${u.acked ? ' <span class="ackt">인지됨</span>' : ""}</td>
+      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${agentBtn(u.agent)}${addBtn(u.suggest)}${portAck(u)}</span></td></tr>`).join("")}</tbody></table>`;
   $("new-wrap").innerHTML = (S.new_items || []).length ? `<h2>🆕 새로 생긴 것 <span style="color:var(--muted);font-weight:500;font-size:13px">설치 뒤 처음 보는 서비스·사내망 포트 · 목록에 올리거나 넘겨 줘</span></h2>
     <div class="card newc">${newRows(S.new_items)}</div>` : "";
 
@@ -673,7 +673,7 @@ function renderServices() {
   if (!qBusy) $("notify-body").innerHTML = notifyBody(S.notify);
   // 목록에 없는 서비스 (접힌 카드 · 이름 옆 + 버튼으로 바로 목록에 추가)
   $("others-sum").textContent = `목록에 없는 서비스 ${others.length}개 · 보고 싶은 건 + 로 올려 줘`;
-  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}</span>`).join("");
+  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${agentBtn(o.agent)}</span>`).join("");
   const newPorts = new Set((S.new_items || []).map((it) => it.port).filter(Boolean));
   const n = S.services.filter((s) => (s.state === "warn" || s.state === "bad") && !s.acked).length + unk.filter((u) => u.exposure === "lan" && !u.acked && !newPorts.has(u.port)).length + live.length + (S.new_items || []).length;
   const bad = S.services.some((s) => s.state === "bad" && !s.acked) || live.length;
@@ -754,6 +754,8 @@ const md = (t) => new Date(t * 1000).toLocaleString("ko-KR", {timeZone: TZ, mont
 const tg = (attrs, on, label, cls = "") => `<button type="button" class="tg ${cls}" role="switch" aria-checked="${on ? "true" : "false"}" ${attrs}>${label ? `<span>${label}</span>` : ""}<i></i></button>`;
 // 서비스 줄 / 포트 줄 인지 토글 (문제 있을 때나 이미 인지했을 때만)
 const svcAck = (s) => (s.state === "warn" || s.state === "bad") ? tg(`data-sack="${esc(s.name)}" data-on="${s.acked ? 0 : 1}"`, !!s.acked, "인지", "sm") : "";
+const agentBtn = (a) => a ? `<button type="button" class="btn mini" data-agent='${esc(JSON.stringify(a))}' title="Hermes Agent 서비스로 보여. Agent 탭에 바로 연결">🤖 Agent 등록</button>` : "";
+const portName = (u) => `<b>${esc(u.label || u.proc || "?")}</b> <span class="empty">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}</span>`;
 const portAck = (u) => u.exposure === "lan" ? tg(`data-pack="${u.port}" data-on="${u.acked ? 0 : 1}"`, !!u.acked, "인지", "sm") : "";
 // 서비스 "관리" 버튼 (systemd 서비스만 — manual/remote는 systemctl로 제어 못 함)
 const scBtn = (s) => (s.scope === "system" || s.scope === "user") ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" title="start/stop/restart/enable/disable">관리</button>` : "";
@@ -828,6 +830,15 @@ function failedRows(list) {
 document.addEventListener("click", async (e) => {
   const ad = e.target.closest("[data-add]");
   if (ad) { openAdd(JSON.parse(ad.dataset.add)); return; }
+  const ag = e.target.closest("[data-agent]");
+  if (ag) {
+    const a = JSON.parse(ag.dataset.agent);
+    if (!confirm(`'${a.unit.replace(/\.service$/, "")}' 은(는) Hermes Agent 서비스로 보여.\nAgent 탭에 바로 연결할까?`)) return;
+    ag.disabled = true;
+    try { await postJSON("api/agent/register", a); setTimeout(() => { load(); document.querySelector('nav button[data-tab="hermes"]')?.click(); }, 800); }
+    catch (err) { alert(err.message); ag.disabled = false; }
+    return;
+  }
   const sk = e.target.closest("[data-skip]");
   if (sk) { sk.disabled = true; try { await postJSON("api/services/skip", {key: sk.dataset.skip}); } catch (err) { alert(err.message); } setTimeout(load, 600); return; }
   const rm = e.target.closest("[data-rmsvc]");
@@ -984,9 +995,9 @@ function renderMobile() {
     ${(S.failed || []).length ? mdet("failed", `${(S.failed || []).some((f) => !f.acked) ? "⚠ " : ""}실패한 서비스 ${(S.failed || []).length}개 · 알고 있으면 인지 켜기`, failedRows(S.failed)) : ""}
     ${mdet("notify", `🔔 알림 · ${esc(notifyHead(S.notify))}`, notifyBody(S.notify))}
     ${unk.length ? mdet("unknown", `${unk.some((u) => u.exposure === "lan" && !u.acked) ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개`, unk.map((u) =>
-      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.proc || "?")}${portAck(u)}</div><div class="sb">pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${addBtn(u.suggest)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
+      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.label || u.proc || "?")}${portAck(u)}</div><div class="sb">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${agentBtn(u.agent)} ${addBtn(u.suggest)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
     ${(S.other_services || []).length ? mdet("others", `목록에 없는 서비스 ${(S.other_services || []).length}개 · + 로 목록에 올려 줘`, `<div class="others">${(S.other_services || []).map((o) =>
-      `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}</span>`).join("")}</div>`) : ""}`;
+      `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${o.agent ? agentBtn(o.agent) : ""}</span>`).join("")}</div>`) : ""}`;
 
   // 탭 바 숫자
   [["hermes", "cnt-hermes"], ["services", "cnt-services"]].forEach(([t, id]) => {

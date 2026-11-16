@@ -74,6 +74,8 @@ EXTRA_FILE = BASE / "services_extra.json"
 # 처음 본 서비스·포트 기록 ("🆕 새로 생긴 것" 판단용)
 SEEN_FILE = BASE / "seen.json"
 EXTRA_LOCK = threading.Lock()
+# 화면에서 [Agent 등록]한 Hermes 서비스 (config.yaml 에 hermes 가 없을 때만 채워 줌)
+AGENT_FILE = BASE / "agent_extra.json"
 
 
 def _read_json(path, default):
@@ -91,6 +93,16 @@ def _write_json(path, data):
 
 def load_extras():
     return [s for s in _read_json(EXTRA_FILE, []) if isinstance(s, dict) and s.get("name")]
+
+
+def _load_agent_extra():
+    """[Agent 등록]으로 저장해 둔 값을 CFG["hermes"] 에 합침 (config.yaml 에 적은 값이 우선)"""
+    saved = _read_json(AGENT_FILE, {})
+    if isinstance(saved, dict) and saved.get("unit"):
+        CFG["hermes"] = {**saved, **(CFG.get("hermes") or {})}
+
+
+_load_agent_extra()
 
 
 def all_services():
@@ -118,6 +130,27 @@ def proc_owner(pid):
         return {"unit": units[-1], "scope": "user"} if units else None
     units = [p for p in parts if p.endswith(".service")]
     return {"unit": units[-1], "scope": "system"} if units else None
+
+
+def short_cmd(pid):
+    """실행 파일 + 스크립트 이름만 (인자에 비밀번호/토큰이 있을 수 있어서 인자는 안 보여줌)"""
+    try:
+        parts = psutil.Process(pid).cmdline()
+    except Exception:
+        return None
+    if not parts:
+        return None
+    exe = os.path.basename(parts[0])
+    script = next((os.path.basename(a) for a in parts[1:] if not a.startswith("-") and "=" not in a), None)
+    return f"{exe} {script}" if script and script != exe else exe
+
+
+def agent_candidate(unit, cmd):
+    """Hermes Agent 서비스로 보이는지 (이름이나 실행 명령에 hermes). 이미 등록됐으면 False"""
+    H = CFG.get("hermes") or {}
+    if not unit or H.get("unit") == unit:
+        return False
+    return "hermes" in f"{unit} {cmd or ''}".lower()
 
 
 def suggest_for(unit=None, user=False, port=None, proc=None):
@@ -683,10 +716,18 @@ def build_services(ports, urlchecks, llama):
     for u in unknown:                   # 포트 연 프로그램이 어느 서비스 소속인지 + 추가용 기본값
         own = proc_owner(u["pid"]) if u.get("pid") else None
         u["owner"] = own
+        u["cmd"] = short_cmd(u["pid"]) if u.get("pid") else None
+        # 화면에 보일 이름: systemd 서비스 이름이 있으면 그걸, 없으면 프로그램 이름
+        u["label"] = own["unit"].removesuffix(".service") if own else (u.get("proc") or f"port-{u['port']}")
+        u["kind"] = "service" if own else "manual"
         u["suggest"] = suggest_for(own and own["unit"], own and own["scope"] == "user", u["port"], u.get("proc"))
+        u["agent"] = ({"unit": own["unit"], "scope": own["scope"]}
+                      if own and agent_candidate(own["unit"], u["cmd"]) else None)
     others = other_sys + other_usr
     for o in others:
         o["suggest"] = suggest_for(o["unit"], o.get("user"))
+        o["agent"] = ({"unit": o["unit"], "scope": "user" if o.get("user") else "system"}
+                      if agent_candidate(o["unit"], None) else None)
     return rows, unknown, others, failed
 
 
@@ -1109,6 +1150,28 @@ def api_services_add():
         mark_handled(str(b["key"]))
     if port:
         _slow["ports_at"] = 0           # 포트 상태 바로 다시 읽기
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/agent/register")
+def api_agent_register():
+    """[Agent 등록]: 확인된 Hermes 서비스를 Agent 탭에 바로 연결 (agent_extra.json 에 저장, 재시작 X)"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    unit, scope = str(b.get("unit") or ""), str(b.get("scope") or "")
+    if not re.fullmatch(r"[A-Za-z0-9@._:\-]+\.service", unit) or scope not in ("system", "user"):
+        return jsonify({"ok": False, "error": "서비스 이름이나 종류가 이상해"}), 400
+    snap = STATE["snapshot"] or {}
+    cands = [x["agent"] for x in (snap.get("unknown_ports") or []) + (snap.get("other_services") or []) if x.get("agent")]
+    if not any(c["unit"] == unit and c["scope"] == scope for c in cands):
+        return jsonify({"ok": False, "error": "지금 화면에 Agent 후보로 보이는 서비스만 등록할 수 있어"}), 400
+    data = {"unit": unit, "scope": scope, "home": "~/.hermes", "log_window_hours": 6}
+    with EXTRA_LOCK:
+        _write_json(AGENT_FILE, data)
+        CFG["hermes"] = {**data, **(CFG.get("hermes") or {})}
+    _slow["hermes_at"] = 0
     WAKE.set()
     return jsonify({"ok": True})
 
