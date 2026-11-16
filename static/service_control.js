@@ -26,6 +26,8 @@
     ".sc-btn{padding:8px 0;border:none;border-radius:8px;cursor:pointer;font-size:14px;background:#334155;color:#e2e8f0;}",
     ".sc-btn:hover{filter:brightness(1.2);}",
     ".sc-btn.sc-danger{background:var(--sc-danger);color:#fff;}",
+    ".sc-hide{margin-top:14px;padding-top:12px;border-top:1px solid #334155;}",
+    ".sc-hide .sc-btn{padding:8px 14px;}",
     ".sc-extra{margin-top:12px;padding-top:11px;border-top:1px solid #334155;}",
     ".sc-row{display:flex;gap:8px;margin-top:10px;}",
     ".sc-row .sc-btn{flex:1;}",
@@ -54,7 +56,7 @@
     });
   }
 
-  function openDialog(name) {
+  function openDialog(name, hideName, manual) {
     var overlay = document.createElement("div");
     overlay.className = "sc-overlay";
     overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
@@ -90,7 +92,9 @@
 
       var s = document.createElement("div");
       s.className = "sc-status";
-      if (current) {
+      if (manual) {
+        s.textContent = "수동 실행 서비스라 시작/중지는 여기서 못 해";
+      } else if (current) {
         s.innerHTML = "상태: <b>" + current.active + "</b> · 자동시작: <b>" + current.enabled +
           "</b> · " + (current.scope === "user" ? "user 서비스" : "system 서비스");
       } else {
@@ -100,18 +104,32 @@
 
       var btns = document.createElement("div");
       btns.className = "sc-btns";
-      ["start", "stop", "restart", "enable", "disable"].forEach(function (a) {
+      (manual ? [] : ["start", "stop", "restart", "enable", "disable"]).forEach(function (a) {
         var b = document.createElement("button");
         b.className = "sc-btn" + (DANGER[a] ? " sc-danger" : "");
         b.textContent = LABEL[a];
         b.addEventListener("click", function () { askConfirm(a); });
         btns.appendChild(b);
       });
-      dlg.appendChild(btns);
+      if (!manual) dlg.appendChild(btns);
       if (extra) { extra.classList.add("sc-extra"); dlg.appendChild(extra); }
+      if (hideName) {                       // 서비스 목록에서 치우기 (구분선 아래 따로)
+        var hz = document.createElement("div");
+        hz.className = manual ? "" : "sc-hide";
+        var hb = document.createElement("button");
+        hb.className = "sc-btn";
+        hb.type = "button";
+        hb.textContent = "목록외 +";
+        hb.setAttribute("data-hide", hideName);
+        hb.title = "서비스 목록에서 치워서 '목록에 없는 서비스' 칸으로 보내";
+        hb.addEventListener("click", function () { setTimeout(close, 0); });   // 실제 처리는 화면의 data-hide 공통 핸들러가 함
+        hz.appendChild(hb);
+        dlg.appendChild(hz);
+      }
     }
 
     function refresh(extra) {
+      if (manual) { render(extra || null); return; }
       api(API + "/" + encodeURIComponent(name)).then(function (j) {
         current = j.service || null;
         render(extra || null);

@@ -204,6 +204,7 @@
   .exp.internet { color: var(--fg); font-weight: 550; }
   [data-subof][hidden] { display: none !important; }
   .subtog { margin-left: 8px; font-size: 11px; padding: 1px 7px; }
+  .hslot { display: inline-block; min-width: 66px; }
   .subrow td { padding-top: 0; border-top: 0; }
   .subrow .svc { font-size: 13px; color: var(--muted); }
   .el { color: var(--muted); margin: 0 6px 0 22px; font-family: monospace; }
@@ -691,7 +692,6 @@ function renderServices() {
       scopeTag || '<span class="tag">system</span>',
       s.optional ? '<span class="tag">선택</span>' : "",
       s.extra ? '<span class="tag">화면 추가</span>' : "",
-      hideBtn(s),
       s.restarts ? `<span class="tag" title="재시작 횟수">재시작 ${s.restarts}회</span>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -938,7 +938,7 @@ const portsTxt = (u) => (u.ports && u.ports.length > 1 ? u.ports.join(" · ") : 
 const moveBtn = (u) => `<button type="button" class="btn mini" data-pmove="${u.port}" title="내가 만든 게 아니면 \"목록에 없는 포트\" 칸으로 치워 둬">목록외 +</button>`;
 const portAck = (u) => u.exposure === "lan" ? tg(`data-pack="${u.port}" data-on="${u.acked ? 0 : 1}"`, !!u.acked, "인지", "sm") : "";
 // 서비스 "관리" 버튼 (systemd 서비스만 — manual/remote는 systemctl로 제어 못 함)
-const scBtn = (s) => (s.scope === "system" || s.scope === "user") ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" title="start/stop/restart/enable/disable">관리</button>` : "";
+const scBtn = (s) => (s.scope === "system" || s.scope === "user") ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" title="start/stop/restart/enable/disable · 목록외 +">관리</button>` : s.scope === "manual" ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" data-manual="1" title="목록외 +">관리</button>` : "";
 // 모바일 접이식 섹션: 새로고침(5초)마다 다시 그려도 열림 상태 유지
 const mdOpen = {};
 document.addEventListener("toggle", (e) => {
@@ -1233,7 +1233,7 @@ function renderMobile() {
       `<small>${s.scope === "manual" ? "수동" : s.scope === "remote" ? "원격" : s.scope === "user" ? "user" : "system"}</small>`,
       s.optional ? "<small>선택</small>" : "",
       s.extra ? "<small>화면 추가</small>" : "",
-      hideBtn(s),
+      
       s.restarts ? `<small>재시작 ${s.restarts}회</small>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -1276,7 +1276,10 @@ setInterval(loadHistory, 60000);
 window.SC_REFRESH = load;                       // dialog 닫히면 화면 새로고침
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-scopen]");
-  if (b && window.SC_OPEN) SC_OPEN(b.dataset.scopen);
+  if (b && window.SC_OPEN) {
+    // "목록외 +" 는 줄에 없고 이 창 아래(구분선 밑)에 들어 있어 (PC·모바일 같음)
+    SC_OPEN(b.dataset.scopen, b.dataset.scopen, !!b.dataset.manual);
+  }
 });
 </script>
 <script src="static/service_control.js"></script>
