@@ -429,6 +429,18 @@
       <button type="button" class="btn ghost" id="ch-cancel">취소</button><button type="button" class="btn" id="ch-ok">저장</button></div>
   </div>
 </div>
+<!-- Mattermost 대화방 열기 설정 창 (서버 · 팀 이름 · 봇 이름을 한 번에) -->
+<div id="mmModal" class="modal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true">
+    <h3 id="mm-title">Mattermost 대화방 열기 설정</h3>
+    <label id="mm-server-wrap">서버 주소<input type="text" id="mm-server" placeholder="mm.example.com" maxlength="120" autocomplete="off"></label>
+    <label>팀 이름<input type="text" id="mm-team" placeholder="myteam" maxlength="64" autocomplete="off"></label>
+    <label>봇 이름 (사용자 이름)<input type="text" id="mm-user" placeholder="thia" maxlength="64" autocomplete="off"></label>
+    <div class="info">브라우저로 Mattermost 를 열면 주소가 <b>서버/팀이름/channels/…</b> 로 보여. 서버·팀 이름은 거기서 복사하고, 봇 이름은 봇 프로필의 <b>@ 뒤 이름</b>이야. @는 붙여도 돼. 서버·팀은 한 번만 쓰면 모든 봇에 적용돼.<br><b>서버 주소는 Mattermost 데스크톱 앱의 서버 목록에 등록된 주소와 똑같이</b> 써야 해 (포트·https 까지 같게). 다르면 앱이 새 서버로 보고 404 가 날 수 있어.</div>
+    <div class="err" id="mm-err" hidden></div>
+    <div class="btns"><button type="button" class="btn ghost" id="mm-cancel">취소</button><button type="button" class="btn" id="mm-ok">저장</button></div>
+  </div>
+</div>
 <script>
 const REFRESH = {{ refresh }} * 1000;
 const $ = (id) => document.getElementById(id);
@@ -995,6 +1007,41 @@ $("am-ok").addEventListener("click", async () => {
   } catch (err) { $("am-err").textContent = err.message; $("am-err").hidden = false; }
   b.disabled = false;
 });
+let mmBot = null;
+function openMM(id) {
+  const bot = ((S.hermes || {}).bots || []).find((x) => x.id === id) || {};
+  mmBot = id;
+  $("mm-title").textContent = `Mattermost 대화방 열기 설정 · ${bot.name || id}`;
+  $("mm-server-wrap").hidden = false;                              // 서버도 항상 보이게 (주소를 틀리게 썼으면 여기서 고쳐)
+  $("mm-server").value = OPEN.server || "";
+  $("mm-team").value = OPEN.team || "";
+  $("mm-user").value = bot.mm_user || "";
+  $("mm-err").hidden = true;
+  $("mmModal").hidden = false;
+  (OPEN.server ? ($("mm-team").value ? $("mm-user") : $("mm-team")) : $("mm-server")).focus();
+}
+async function saveMM() {
+  const err = (m) => { $("mm-err").textContent = m; $("mm-err").hidden = false; };
+  const server = $("mm-server").value.trim(), team = $("mm-team").value.trim(), user = $("mm-user").value.trim();
+  if (!OPEN.server && !server) return err("서버 주소를 적어 줘");
+  if (!team) return err("팀 이름을 적어 줘");
+  if (!user) return err("봇 이름을 적어 줘");
+  $("mm-ok").disabled = true;
+  try {
+    const body = {};
+    if (server && server !== (OPEN.server || "")) body.server = server;
+    if (team !== (OPEN.team || "")) body.team = team;
+    if (Object.keys(body).length) { const r = await postJSON("api/agent/open", body); OPEN.server = r.open.server; OPEN.team = r.open.team; }
+    await postJSON("api/agent/bot", {id: mmBot, mattermost: user});
+    $("mmModal").hidden = true;
+    setTimeout(load, 500);
+  } catch (e) { err(e.message); }
+  $("mm-ok").disabled = false;
+}
+$("mm-ok").addEventListener("click", saveMM);
+$("mm-cancel").addEventListener("click", () => { $("mmModal").hidden = true; });
+$("mmModal").addEventListener("click", (e) => { if (e.target.id === "mmModal") $("mmModal").hidden = true; });
+["mm-server", "mm-team", "mm-user"].forEach((i) => $(i).addEventListener("keydown", (e) => { if (e.key === "Enter") saveMM(); }));
 async function postJSON(url, body) {
   const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
@@ -1032,27 +1079,7 @@ document.addEventListener("click", async (e) => {
     setTimeout(load, 500); return;
   }
   const mmb = e.target.closest("[data-mmbot]");
-  if (mmb) {
-    const id = mmb.dataset.mmbot, bot = ((S.hermes || {}).bots || []).find((x) => x.id === id) || {};
-    try {
-      if (!OPEN.server) {
-        const v = prompt("Mattermost 서버 주소를 적어 줘 (예: mm.example.com)\n브라우저로 Mattermost 열 때 주소창에 보이는 서버 이름이야. https:// 는 빼도 돼.", "");
-        if (v === null || !v.trim()) return;
-        OPEN.server = (await postJSON("api/agent/open", {server: v.trim()})).open.server;
-      }
-      if (!OPEN.team) {
-        const v = prompt("Mattermost 팀 이름을 적어 줘 (예: myteam)\n주소가 mm.example.com/myteam/channels/... 일 때 가운데 myteam 이야.", "");
-        if (v === null || !v.trim()) return;
-        OPEN.team = (await postJSON("api/agent/open", {team: v.trim()})).open.team;
-      }
-      if (!bot.mm_user) {
-        const v = prompt(`'${bot.name || id}' 봇의 Mattermost 사용자 이름을 적어 줘 (예: thia)\nMattermost 에서 이 봇 프로필의 '@' 뒤 이름이야. @는 빼도 되고 붙여도 돼.`, "");
-        if (v === null || !v.trim()) return;
-        await postJSON("api/agent/bot", {id, mattermost: v.trim()});
-      }
-    } catch (err) { alert(err.message); }
-    setTimeout(load, 500); return;
-  }
+  if (mmb) { openMM(mmb.dataset.mmbot); return; }
   const tgc = e.target.closest("[data-tgclear]");
   if (tgc) {
     if (!confirm(`저장한 텔레그램 아이디 @${tgc.dataset.cur} 를 지울까?\n(텔레그램 연결 자체는 안 건드려. 지우면 칩의 ＋아이디로 다시 쓸 수 있어)`)) return;
