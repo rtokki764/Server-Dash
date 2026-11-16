@@ -1,9 +1,0 @@
-[Unit]
-Description=Hermes MCP 자동 복구를 5분마다 실행 (watchdog 설정이 있을 때만 켜짐)
-
-[Timer]
-OnBootSec=5min
-OnUnitActiveSec=5min
-
-[Install]
-WantedBy=timers.target

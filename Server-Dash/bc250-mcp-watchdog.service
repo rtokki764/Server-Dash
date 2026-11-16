@@ -1,7 +1,0 @@
-[Unit]
-Description=Hermes MCP 자동 복구 (parked 상태면 게이트웨이 재시작, 설정이 있을 때만 켜짐)
-
-[Service]
-Type=oneshot
-WorkingDirectory=%h/bc250-dash
-ExecStart=%h/bc250-dash/.venv/bin/python %h/bc250-dash/mcp_watchdog.py

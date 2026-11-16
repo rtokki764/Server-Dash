@@ -383,7 +383,7 @@ def systemd_show(units, user):
         return {}
     cmd = ["systemctl"] + (["--user"] if user else []) + [
         "show", "--timestamp=unix",
-        "-p", "Id,ActiveState,SubState,ActiveEnterTimestamp,StateChangeTimestamp,NRestarts,MainPID", *units]
+        "-p", "Id,LoadState,ActiveState,SubState,ActiveEnterTimestamp,StateChangeTimestamp,NRestarts,MainPID", *units]
     out, res = run(cmd), {}
     for block in out.strip().split("\n\n"):
         kv = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
@@ -394,7 +394,7 @@ def systemd_show(units, user):
         ch = kv.get("StateChangeTimestamp", "")
         changed = int(ch[1:]) if ch.startswith("@") and ch[1:].isdigit() else None
         res[kv["Id"]] = {
-            "active": kv.get("ActiveState"), "sub": kv.get("SubState"),
+            "active": kv.get("ActiveState"), "sub": kv.get("SubState"), "load": kv.get("LoadState"),
             "since": since if kv.get("ActiveState") == "active" else None,
             "changed": changed,     # 마지막으로 상태가 바뀐 시각 (실패한 서비스면 = 실패한 시각)
             "restarts": int(kv["NRestarts"]) if kv.get("NRestarts", "").isdigit() else None,
@@ -677,7 +677,11 @@ def read_hermes():
 # ─────────────────────────────────────────────
 #  서비스 표 만들기 (config + systemd + 포트)
 # ─────────────────────────────────────────────
+_gone = []      # 서비스 파일이 사라져서 표에서 자동으로 뺀 것들 (매 수집마다 새로 채움)
+
+
 def build_services(ports, urlchecks, llama):
+    _gone.clear()
     svcs = all_services()
     sys_units = [s["unit"] for s in svcs if s.get("scope") == "system"]
     usr_units = [s["unit"] for s in svcs if s.get("scope") == "user"]
@@ -699,6 +703,12 @@ def build_services(ports, urlchecks, llama):
             info = {"active": "active" if running else "inactive", "since": since, "restarts": None}
         else:
             info = st.get(s["unit"], {"active": "unknown", "since": None, "restarts": None})
+            if info.get("load") == "not-found":
+                # 서비스 파일 자체가 지워졌어 (누가 삭제/제거함) → 꺼짐 경고 대신 표에서 자동으로 뺌
+                _gone.append({"name": s["name"], "unit": s["unit"], "port": port})
+                if port and not any(x.get("port") == port and x is not s for x in svcs):
+                    claimed.discard(port)       # 그 포트가 아직 열려 있으면 "목록에 없는 포트"로 다시 보이게
+                continue
         state = {"active": "ok", "activating": "warn", "reloading": "warn"}.get(info["active"], "bad")
         if state == "bad" and s.get("optional"):
             state = "off"           # 일부러 꺼 두는 서비스 → 회색 "꺼짐", 경고 안 함
@@ -1042,7 +1052,7 @@ def collect_once():
         "agent_enabled": bool((CFG.get("hermes") or {}).get("unit")),
         "agent_cfg": _agent_cfg(),
         "overall": overall, "badges": badges, "hw": hw, "llama": llama,
-        "services": services, "unknown_ports": unknown, "other_services": others,
+        "services": services, "gone_services": list(_gone), "unknown_ports": unknown, "other_services": others,
         "failed": failed, "new_items": new_items, "acked": acked, "acked_count": len(acked), "metric_acks": macks, "hermes": hz,
         "notify": NOTIFY.status(now), "thresholds": TH, "title": TITLE,
     }
