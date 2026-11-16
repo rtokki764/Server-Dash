@@ -100,10 +100,22 @@ def load_extras():
 
 
 def _load_agent_extra():
-    """[Agent 등록]으로 저장해 둔 값을 CFG["hermes"] 에 합침 (config.yaml 에 적은 값이 우선)"""
+    """화면에서 저장해 둔 Agent 값([Agent 등록], 봇 아이디)을 CFG["hermes"] 에 합침 (config.yaml 에 적은 값이 우선)"""
     saved = _read_json(AGENT_FILE, {})
-    if isinstance(saved, dict) and saved.get("unit"):
-        CFG["hermes"] = {**saved, **(CFG.get("hermes") or {})}
+    if not isinstance(saved, dict):
+        return
+    cur = CFG.get("hermes") or {}
+    merged = {**{k: v for k, v in saved.items() if k != "bots"}, **cur}
+    bots = {}
+    for k in set(saved.get("bots") or {}) | set(cur.get("bots") or {}):
+        bots[k] = {**((saved.get("bots") or {}).get(k) or {}), **((cur.get("bots") or {}).get(k) or {})}
+    if bots:
+        merged["bots"] = bots
+    ign = sorted({str(x).lower() for x in (saved.get("ignore") or [])} | {str(x).lower() for x in (cur.get("ignore") or [])})
+    if ign:
+        merged["ignore"] = ign
+    if merged.get("unit") or bots or ign:
+        CFG["hermes"] = merged
 
 
 _load_agent_extra()
@@ -472,7 +484,7 @@ def read_hermes_state():
     H = CFG.get("hermes") or {}
     home = Path(os.path.expanduser(H.get("home", "~/.hermes")))
     meta = H.get("bots", {})
-    out = {"gateway": None, "bots": []}
+    out = {"gateway": None, "bots": [], "ignored": []}
     try:
         gs = json.loads((home / "gateway_state.json").read_text())
     except Exception:
@@ -484,15 +496,21 @@ def read_hermes_state():
     parked = set((gs.get("parked_profiles") or {}).keys())
 
     # 플랫폼: "thia:mattermost" → thia, 접두사 없으면 default
-    plats = {}
+    plats, ignored = {}, []
+    ign = {str(x).lower() for x in (H.get("ignore") or [])}
     for key, v in (gs.get("platforms") or {}).items():
         prof, _, plat = key.rpartition(":")
         prof = prof or "default"
+        if f"{prof}:{plat}".lower() in ign:        # 사용자가 [숨기기]로 치운 연결 → 표시·경고·알림에서 뺌
+            ignored.append({"key": f"{prof}:{plat}".lower(), "state": v.get("state")})
+            continue
         st = v.get("state")
         lv = "ok" if st == "connected" and not v.get("needs_attention") else (
              "warn" if st in ("connecting", "retrying", "reconnecting") or v.get("retrying_since") else "bad")
         plats.setdefault(prof, []).append({"name": plat.capitalize(), "state": st, "level": lv,
                                            "error": v.get("error_message")})
+
+    out["ignored"] = ignored
 
     # 봇마다 자기 state.db 를 따로 씀: default → ~/.hermes, 나머지 → ~/.hermes/profiles/<이름>
     def prof_dir(prof):
@@ -1243,6 +1261,69 @@ def api_ports_move():
         (cur_list.add if on else cur_list.discard)(port)
         _write_json(MOVED_FILE, sorted(cur_list))
     _slow["ports_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/agent/ignore")
+def api_agent_ignore():
+    """봇의 메신저 연결 하나를 화면·경고·알림에서 숨기기(on=true) / 되돌리기(on=false). 형식 '봇:플랫폼' (예: default:telegram)"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    key, on = str(b.get("key") or "").lower().strip(), bool(b.get("on", True))
+    hz = (STATE["snapshot"] or {}).get("hermes") or {}
+    known = {f"{bot['id']}:{p['name']}".lower() for bot in hz.get("bots", []) for p in bot.get("platforms", [])}
+    known |= {x["key"] for x in hz.get("ignored", [])}
+    if key not in known:
+        return jsonify({"ok": False, "error": "그런 연결이 화면에 없어"}), 400
+    with EXTRA_LOCK:
+        saved = _read_json(AGENT_FILE, {})
+        if not isinstance(saved, dict):
+            saved = {}
+        cur = {str(x).lower() for x in (saved.get("ignore") or [])}
+        (cur.add if on else cur.discard)(key)
+        saved["ignore"] = sorted(cur)
+        _write_json(AGENT_FILE, saved)
+        H = CFG.setdefault("hermes", {})
+        allc = {str(x).lower() for x in (H.get("ignore") or [])}
+        (allc.add if on else allc.discard)(key)
+        H["ignore"] = sorted(allc)
+    _slow["hermes_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/agent/bot")
+def api_agent_bot():
+    """봇 카드의 [Telegram] 칩을 눌러 봇 아이디를 알려 주면 저장 → 다음부터 칩을 누르면 텔레그램이 열려"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    bid, tg = str(b.get("id") or ""), str(b.get("telegram") or "").strip().lstrip("@")
+    ids = {x["id"] for x in ((STATE["snapshot"] or {}).get("hermes") or {}).get("bots", [])}
+    if bid not in ids:
+        return jsonify({"ok": False, "error": "그런 봇이 화면에 없어"}), 400
+    if tg and not re.fullmatch(r"[A-Za-z0-9_]{3,64}", tg):
+        return jsonify({"ok": False, "error": "텔레그램 봇 아이디는 영문·숫자·_ 만 쓸 수 있어 (예: my_bot)"}), 400
+    with EXTRA_LOCK:
+        saved = _read_json(AGENT_FILE, {})
+        if not isinstance(saved, dict):
+            saved = {}
+        bots = saved.setdefault("bots", {})
+        bots.setdefault(bid, {})
+        if tg:
+            bots[bid]["telegram"] = tg
+        else:
+            bots[bid].pop("telegram", None)
+        _write_json(AGENT_FILE, saved)
+        cur = CFG.setdefault("hermes", {}).setdefault("bots", {})
+        cur.setdefault(bid, {})
+        if tg:
+            cur[bid]["telegram"] = tg
+        else:
+            cur[bid].pop("telegram", None)
+    _slow["hermes_at"] = 0
     WAKE.set()
     return jsonify({"ok": True})
 

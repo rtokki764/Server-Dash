@@ -175,6 +175,8 @@
   .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 7px; padding: 4px 10px; font-size: 13px; }
   .chip small { color: var(--muted); }
   a.chip { color: inherit; text-decoration: none; cursor: pointer; }
+  button.chip { border: 0; font: inherit; font-size: 13px; color: inherit; cursor: pointer; }
+  .chip .go { color: var(--muted); font-size: 11px; }
   a.chip:hover { outline: 1px solid var(--muted); }
   a.chip .go { color: var(--muted); font-size: 11px; margin-left: -2px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; display: inline-block; }
@@ -430,10 +432,11 @@ function appLink(bot, plat) {
     const host = (!IS_MOBILE && OPEN.at_office && OPEN.server_office) ? OPEN.server_office : OPEN.server;
     return host ? `mattermost://${host}/${OPEN.team}/messages/@${bot.mm_user}` : null;
   }
-  if (plat === "Telegram") return bot.tg_user ? `tg://resolve?domain=${bot.tg_user}` : null;
+  if (plat === "Telegram") return bot.tg_user ? `https://t.me/${bot.tg_user}` : null;
   return null;
 }
 // 칩: 링크가 있으면 누를 수 있게 <a>
+const ignoreBtn = (botId, plat) => `<button type="button" class="btn mini ghost" data-pignore="${esc(botId)}:${esc(plat.toLowerCase())}" title="이 서버에서 안 쓰는 연결이면 화면·경고·알림에서 숨겨 (되돌릴 수 있어)">숨기기</button>`;
 function linkChip(href, inner, title) {
   return href ? `<a class="chip" href="${esc(href)}" title="${esc(title)}">${inner}<span class="go">↗</span></a>` : `<span class="chip">${inner}</span>`;
 }
@@ -623,8 +626,11 @@ function renderHermes() {
       const lp = logPlat[p.name];
       const extra = lp && lp.fails_1h ? ` · 재연결 ${lp.fails_1h}회/시간` : "";
       const lv = p.level === "ok" && lp && lp.state !== "ok" ? lp.state : p.level;
-      return linkChip(appLink(b, p.name), `<span class="dot ${lv}"></span>${esc(p.name)} <small>${esc((p.state === "connected" ? "연결됨" : p.state) + extra)}</small>`,
-        `${p.name} 앱에서 ${b.name} 대화방 열기`);
+      const inner = `<span class="dot ${lv}"></span>${esc(p.name)} <small>${esc((p.state === "connected" ? "연결됨" : p.state) + extra)}</small>`;
+      const href = appLink(b, p.name);
+      if (!href && p.name === "Telegram")      // 봇 아이디를 모르면 눌러서 알려 주게
+        return `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 이 봇의 텔레그램 아이디를 알려 주면, 다음부터 이 칩으로 대화방이 열려">${inner}<span class="go">＋아이디</span></button>` + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
+      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
     }).join("") || '<span class="empty">연결된 메신저 없음</span>';
     return `<div class="card bot ${b.level}">
       <div class="top"><span class="dot ${b.level}"></span><span class="nm">${esc(b.name)}</span><span class="rl">${esc(b.role || "")}</span>${b.parked ? '<span class="tag" style="color:var(--bad)">parked</span>' : ""}</div>
@@ -644,6 +650,7 @@ function renderHermes() {
     <div class="row"><div class="k">게이트웨이</div><div><div class="chips">${gw.map((s) => chip(s.state, s.name, s.since ? dur(Date.now() / 1000 + offset - s.since) : "")).join("") || (hz.gateway ? chip(/run|connect|ok|active/i.test(hz.gateway.state || "") ? "ok" : "warn", unitName, hz.gateway.state || "") : '<span class="empty">기록 없음</span>')}</div>${gwInfo ? `<div class="sub">${gwInfo}</div>` : ""}</div></div>
     ${bots.length ? "" : `<div class="row"><div class="k">메신저 연결</div><div class="chips">${plat.join("") || '<span class="empty">기록 없음</span>'}</div></div>`}
     ${mcp.length || ac.mcp_name || ac.mcp_logged ? `<div class="row"><div class="k">MCP 서버</div><div><div class="chips">${mcp.join("") || (ac.mcp_name ? chip("ok", ac.mcp_name, "이상 기록 없음") : '<span class="empty">기록 없음</span>')}</div>${wd}</div></div>` : ""}
+    ${(hz.ignored || []).length ? `<div class="row"><div class="k">숨긴 연결</div><div class="chips">${hz.ignored.map((x) => `<span class="chip">${esc(x.key)} <small>${esc(x.state || "")}</small><button type="button" class="mute-x" data-pignore="${esc(x.key)}" data-off="1" title="다시 보이기">되돌리기</button></span>`).join("")}</div></div>` : ""}
     <div class="row"><div class="k">최근 ${hz.window_h || 6}시간 경고</div><div class="chips">${grp.join("") || '<span class="empty">경고 없음</span>'}</div></div>`;
   $("hermes-log").innerHTML = (hz.tail || []).slice().reverse().map((l) =>
     `<div class="${esc(l.level)}"><span class="t">${hms(l.t)}</span>${esc(l.msg)}</div>`).join("") || '<span class="empty">로그 없음</span>';
@@ -970,6 +977,22 @@ function failedRows(list) {
 document.addEventListener("click", async (e) => {
   const ad = e.target.closest("[data-add]");
   if (ad) { openAdd(JSON.parse(ad.dataset.add)); return; }
+  const pig = e.target.closest("[data-pignore]");
+  if (pig) {
+    const on = !pig.dataset.off, key = pig.dataset.pignore;
+    if (on && !confirm(`'${key}' 연결을 숨길까?\n(이 서버에서 안 쓰는 연결이면 숨기면 돼. 화면·경고·알림에서 빠지고, 'Agent' 탭의 '숨긴 연결'에서 되돌릴 수 있어)`)) return;
+    pig.disabled = true;
+    try { await postJSON("api/agent/ignore", {key, on}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
+  const tgb = e.target.closest("[data-tgbot]");
+  if (tgb) {
+    const id = tgb.dataset.tgbot;
+    const v = prompt("이 봇의 텔레그램 아이디를 적어 줘 (@ 뒤의 이름, 예: my_bot)\n아이디는 텔레그램에서 봇 프로필의 '@...' 이거야.", "");
+    if (v === null || !v.trim()) return;
+    try { await postJSON("api/agent/bot", {id, telegram: v.trim()}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
   const hd = e.target.closest("[data-hide]");
   if (hd) {
     const on = !hd.dataset.off;
@@ -1137,7 +1160,12 @@ function renderMobile() {
   const hz = S.hermes || {};
   const colors = ["#5c9dff", "#a77bff", "#ff8a5c", "#3ecf7e", "#f0b23e", "#ff6b9a"];
   $("m-bots").innerHTML = (hz.bots || []).map((b, i) => {
-    const pl = b.platforms.map((p) => linkChip(appLink(b, p.name), `<span class="dot ${p.level}"></span>${esc(p.name)}`, `${p.name} 열기`)).join("");
+    const pl = b.platforms.map((p) => {
+      const inner = `<span class="dot ${p.level}"></span>${esc(p.name)}`, href = appLink(b, p.name);
+      return !href && p.name === "Telegram"
+        ? `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 봇의 텔레그램 아이디를 알려 줘">${inner}<span class="go">＋아이디</span></button>`
+        : linkChip(href, inner, `${p.name} 열기`);
+    }).map((c, i) => c + (b.platforms[i].level !== "ok" ? ignoreBtn(b.id, b.platforms[i].name) : "")).join("");
     return `<div class="mi"><div class="av" style="--c:${colors[i % colors.length]}">${esc((b.name || "?")[0])}</div>
       <div class="mid"><div class="nm">${esc(b.name)} <small>${esc(b.role || "")}</small></div>
         <div class="sb">${esc(b.model || "모델 기록 없음")}</div>${pl ? `<div class="chips" style="margin-top:6px">${pl}</div>` : ""}</div>
