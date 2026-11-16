@@ -772,14 +772,14 @@ def build_services(ports, urlchecks, llama):
         u["suggest"] = suggest_for(own and own["unit"], own and own["scope"] == "user", u["port"], u.get("proc"))
         u["agent"] = ({"unit": own["unit"], "scope": own["scope"]}
                       if own and agent_candidate(own["unit"], u["cmd"]) else None)
-    # 같은 서비스가 연 포트 정리: ① 이미 목록에 있는 서비스가 연 내부 포트는 그 줄에 "+ :포트"로 붙임
+    # 같은 서비스가 연 포트 정리: ① 이미 목록에 있는 서비스가 연 포트(내부·사내망)는 그 줄에 "+ :포트"로 붙임
     #                            ② 목록에 없는 서비스가 연 포트들은 한 줄로 묶음 (노출 범위가 같은 것끼리)
     row_by_unit = {r["unit"]: r for r in rows if r.get("unit")}
     rest = []
     for u in unknown:
         row = row_by_unit.get((u.get("owner") or {}).get("unit"))
-        if row and u["exposure"] == "internal":
-            row.setdefault("sub_ports", []).append(u["port"])
+        if row:         # 사내망 포트도 붙임 (대신 줄에 🏢 사내망으로 그대로 보여서 노출 범위는 숨기지 않아)
+            row.setdefault("sub_ports", []).append({"port": u["port"], "exposure": u["exposure"]})
             continue
         rest.append(u)
     grouped, unknown = {}, []
@@ -812,9 +812,9 @@ def build_services(ports, urlchecks, llama):
     moved = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
     keep = []
     for u in unknown:
-        if u["port"] in moved and u["exposure"] == "internal":
+        if u["port"] in moved:
             own = u.get("owner")
-            _moved_ports.append({"port": u["port"], "ports": u.get("ports") or [u["port"]], "label": u["label"],
+            _moved_ports.append({"port": u["port"], "exposure": u["exposure"], "ports": u.get("ports") or [u["port"]], "label": u["label"],
                                  "unit": own["unit"] if own else None, "user": bool(own and own["scope"] == "user"),
                                  "suggest": u["suggest"], "agent": u["agent"]})
         else:
@@ -1286,8 +1286,8 @@ def api_ports_move():
     on = bool(b.get("on", True))
     if on:
         cur = next((u for u in (STATE["snapshot"] or {}).get("unknown_ports") or [] if u["port"] == port), None)
-        if not cur or cur.get("exposure") != "internal":
-            return jsonify({"ok": False, "error": "내부 전용 포트만 '목록에 없는 포트' 칸으로 보낼 수 있어 (사내망 포트는 인지로 처리해 줘)"}), 400
+        if not cur:
+            return jsonify({"ok": False, "error": "새로 감지된 포트에 없는 포트야"}), 400
     with EXTRA_LOCK:
         cur_list = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
         (cur_list.add if on else cur_list.discard)(port)
