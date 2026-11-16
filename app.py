@@ -118,7 +118,15 @@ def _load_agent_extra():
         CFG["hermes"] = merged
 
 
-_FILE_TG = {str(k): str((v or {}).get("telegram") or "").lstrip("@")
+def _tg_norm(v):
+    """텔레그램 봇 아이디 정리: @, 공백, t.me 주소 통째로 붙여 넣은 것도 이름만 남김"""
+    t = str(v or "").strip()
+    t = re.sub(r"^(?:https?://)?(?:t\.me/|telegram\.me/)", "", t, flags=re.I)
+    t = re.sub(r"^tg://resolve\?domain=", "", t, flags=re.I)
+    return t.split("?")[0].strip().strip("/").lstrip("@").strip()
+
+
+_FILE_TG = {str(k): _tg_norm((v or {}).get("telegram"))
             for k, v in ((CFG.get("hermes") or {}).get("bots") or {}).items() if (v or {}).get("telegram")}   # config.yaml 에 직접 적힌 텔레그램 아이디
 _load_agent_extra()
 
@@ -581,7 +589,7 @@ def read_hermes_state():
         a = acts.get(prof, {})
         level = "bad" if prof in parked else max((p["level"] for p in pl), key=["ok", "warn", "bad"].index, default="off")
         out["bots"].append({"id": prof, "name": m.get("name", prof), "role": m.get("role"),
-                            "mm_user": m.get("mattermost"), "tg_user": str(m.get("telegram") or "").lstrip("@") or None,
+                            "mm_user": m.get("mattermost"), "tg_user": _tg_norm(m.get("telegram")) or None,
                             "parked": prof in parked, "level": level, "platforms": pl,
                             "last": a.get("last"), "model": a.get("model"), "today": a.get("today", 0)})
     return out
@@ -1348,12 +1356,14 @@ def api_agent_bot():
     if not request.is_json:
         return jsonify({"ok": False, "error": "json only"}), 415
     b = request.get_json(silent=True) or {}
-    bid, tg = str(b.get("id") or ""), str(b.get("telegram") or "").strip().lstrip("@")
+    bid, tg = str(b.get("id") or ""), _tg_norm(b.get("telegram"))
     ids = {x["id"] for x in ((STATE["snapshot"] or {}).get("hermes") or {}).get("bots", [])}
     if bid not in ids:
         return jsonify({"ok": False, "error": "그런 봇이 화면에 없어"}), 400
     if tg and not re.fullmatch(r"[A-Za-z0-9_]{3,64}", tg):
-        return jsonify({"ok": False, "error": "텔레그램 봇 아이디는 영문·숫자·_ 만 쓸 수 있어 (예: my_bot)"}), 400
+        return jsonify({"ok": False, "error": "텔레그램 봇 아이디는 영문·숫자·_ 만 쓸 수 있어 (예: my_bot). 봇 프로필의 @ 뒤 이름이야"}), 400
+    if tg and not tg.lower().endswith("bot"):
+        return jsonify({"ok": False, "error": f"'{tg}' 는 봇 아이디가 아닌 것 같아. 텔레그램 봇 아이디는 항상 'bot' 으로 끝나 (예: my_secretary_bot). 봇 프로필의 '@' 뒤 이름이지, 화면에 보이는 이름(예: Mia)이 아니야"}), 400
     if bid in _FILE_TG and tg != _FILE_TG[bid]:
         return jsonify({"ok": False, "error": f"이 아이디(@{_FILE_TG[bid]})는 config.yaml 에 적혀 있어서 화면에서는 못 고쳐. config.yaml 의 hermes.bots.{bid}.telegram 을 직접 고치고 대시보드를 재시작해 줘"}), 400
     with EXTRA_LOCK:

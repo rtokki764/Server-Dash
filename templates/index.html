@@ -1031,7 +1031,7 @@ document.addEventListener("click", async (e) => {
   const tgb = e.target.closest("[data-tgbot]");
   if (tgb) {
     const id = tgb.dataset.tgbot;
-    const v = prompt("이 봇의 텔레그램 아이디를 적어 줘 (@ 뒤의 이름, 예: my_bot)\n아이디는 텔레그램에서 봇 프로필의 '@...' 이거야.", "");
+    const v = prompt("이 봇의 텔레그램 아이디를 적어 줘\n봇 프로필의 '@' 뒤 이름이야 (예: my_secretary_bot). @는 빼도 되고 붙여도 돼.\n주의: 화면에 보이는 이름(예: Mia)이 아니라 'bot'으로 끝나는 사용자 이름이야.", "");
     if (v === null || !v.trim()) return;
     try { await postJSON("api/agent/bot", {id, telegram: v.trim()}); } catch (err) { alert(err.message); }
     setTimeout(load, 500); return;
