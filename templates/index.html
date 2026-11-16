@@ -437,6 +437,7 @@ const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";   // 보�
 const OPEN = {{ open_cfg | tojson }};
 const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 // 봇 대화방을 앱으로 바로 여는 주소 (없으면 null → 그냥 칩)
+const tgEdit = (b, plat) => plat === "Telegram" && b.tg_user ? `<button type="button" class="btn mini ghost" data-tgclear="${esc(b.id)}" data-cur="${esc(b.tg_user)}" title="저장한 텔레그램 봇 아이디(@${esc(b.tg_user)})를 지워서 다시 입력할 수 있게 해">끊기</button>` : "";
 function appLink(bot, plat) {
   if (plat === "Mattermost" && bot.mm_user && OPEN.team) {
     const host = (!IS_MOBILE && OPEN.at_office && OPEN.server_office) ? OPEN.server_office : OPEN.server;
@@ -640,7 +641,7 @@ function renderHermes() {
       const href = appLink(b, p.name);
       if (!href && p.name === "Telegram")      // 봇 아이디를 모르면 눌러서 알려 주게
         return `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 이 봇의 텔레그램 아이디를 알려 주면, 다음부터 이 칩으로 대화방이 열려">${inner}<span class="go">＋아이디</span></button>` + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
-      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
+      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + tgEdit(b, p.name) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
     }).join("") || '<span class="empty">연결된 메신저 없음</span>';
     return `<div class="card bot ${b.level}">
       <div class="top"><span class="dot ${b.level}"></span><span class="nm">${esc(b.name)}</span><span class="rl">${esc(b.role || "")}</span>${b.parked ? '<span class="tag" style="color:var(--bad)">parked</span>' : ""}</div>
@@ -1019,6 +1020,13 @@ document.addEventListener("click", async (e) => {
     try { await postJSON("api/agent/ignore", {key, on}); } catch (err) { alert(err.message); }
     setTimeout(load, 500); return;
   }
+  const tgc = e.target.closest("[data-tgclear]");
+  if (tgc) {
+    if (!confirm(`저장한 텔레그램 아이디 @${tgc.dataset.cur} 를 지울까?\n(텔레그램 연결 자체는 안 건드려. 지우면 칩의 ＋아이디로 다시 쓸 수 있어)`)) return;
+    tgc.disabled = true;
+    try { await postJSON("api/agent/bot", {id: tgc.dataset.tgclear, telegram: ""}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
   const tgb = e.target.closest("[data-tgbot]");
   if (tgb) {
     const id = tgb.dataset.tgbot;
@@ -1206,7 +1214,7 @@ function renderMobile() {
       const inner = `<span class="dot ${p.level}"></span>${esc(p.name)}`, href = appLink(b, p.name);
       return !href && p.name === "Telegram"
         ? `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 봇의 텔레그램 아이디를 알려 줘">${inner}<span class="go">＋아이디</span></button>`
-        : linkChip(href, inner, `${p.name} 열기`);
+        : linkChip(href, inner, `${p.name} 열기`) + tgEdit(b, p.name);
     }).map((c, i) => c + (b.platforms[i].level !== "ok" ? ignoreBtn(b.id, b.platforms[i].name) : "")).join("");
     return `<div class="mi"><div class="av" style="--c:${colors[i % colors.length]}">${esc((b.name || "?")[0])}</div>
       <div class="mid"><div class="nm">${esc(b.name)} <small>${esc(b.role || "")}</small></div>

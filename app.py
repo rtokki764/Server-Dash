@@ -118,6 +118,8 @@ def _load_agent_extra():
         CFG["hermes"] = merged
 
 
+_FILE_TG = {str(k): str((v or {}).get("telegram") or "").lstrip("@")
+            for k, v in ((CFG.get("hermes") or {}).get("bots") or {}).items() if (v or {}).get("telegram")}   # config.yaml 에 직접 적힌 텔레그램 아이디
 _load_agent_extra()
 
 
@@ -1338,6 +1340,8 @@ def api_agent_bot():
         return jsonify({"ok": False, "error": "그런 봇이 화면에 없어"}), 400
     if tg and not re.fullmatch(r"[A-Za-z0-9_]{3,64}", tg):
         return jsonify({"ok": False, "error": "텔레그램 봇 아이디는 영문·숫자·_ 만 쓸 수 있어 (예: my_bot)"}), 400
+    if bid in _FILE_TG and tg != _FILE_TG[bid]:
+        return jsonify({"ok": False, "error": f"이 아이디(@{_FILE_TG[bid]})는 config.yaml 에 적혀 있어서 화면에서는 못 고쳐. config.yaml 의 hermes.bots.{bid}.telegram 을 직접 고치고 대시보드를 재시작해 줘"}), 400
     with EXTRA_LOCK:
         saved = _read_json(AGENT_FILE, {})
         if not isinstance(saved, dict):
