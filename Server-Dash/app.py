@@ -25,13 +25,17 @@ import yaml
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from notify import Notifier
-from service_control import make_service_control
+from service_control import make_service_control, _secure_enough
 
 BASE = Path(__file__).resolve().parent
 CFG = yaml.safe_load((BASE / "config.yaml").read_text(encoding="utf-8"))
 DEMO = os.environ.get("BC250_DEMO") == "1"
 
 D = CFG.get("dashboard") or {}
+try:  # 버전은 코드와 함께 오는 VERSION 파일에서 읽음 (config.yaml 이 옛날 거여도 정확하게 표시)
+    APP_VERSION = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION"), encoding="utf-8").read().strip()
+except OSError:
+    APP_VERSION = D.get("version", "")
 # 경고 기준: config에 없으면 무난한 기본값
 _TH_DEFAULT = {
     "apu_temp_c": {"warn": 80, "bad": 90}, "gpu_temp_c": {"warn": 80, "bad": 90},
@@ -40,7 +44,21 @@ _TH_DEFAULT = {
     "telegram_reconnects_per_hour": {"warn": 3, "bad": 20},
 }
 TH = {**_TH_DEFAULT, **(CFG.get("thresholds") or {})}
-SENS = CFG.get("sensors") or {}
+def _auto_sensors():
+    """config.yaml 에 sensors 가 없어도 AMD APU/GPU(BC250 등)면 알아서 찾음. 없는 센서는 값이 None 이라 화면에서 그냥 빠짐."""
+    card = next((c for c in sorted(glob("/sys/class/drm/card[0-9]*"))
+                 if Path(c, "device/mem_info_vram_used").exists()), "/sys/class/drm/card0")
+    dev = card + "/device/"
+    return {
+        "gpu_busy": dev + "gpu_busy_percent", "vram_used": dev + "mem_info_vram_used",
+        "vram_total": dev + "mem_info_vram_total", "gtt_used": dev + "mem_info_gtt_used",
+        "gtt_total": dev + "mem_info_gtt_total",
+        "apu_temp": {"chip": "k10temp", "label": "Tctl"}, "gpu_temp": {"chip": "amdgpu", "label": "edge"},
+        "apu_power": {"chip": "amdgpu", "label": "PPT"}, "pump_fan": {"chip": "nct6686", "label": "Pump Fan"},
+    }
+
+
+SENS = {**_auto_sensors(), **(CFG.get("sensors") or {})}   # config 에 적은 것이 우선
 # 제목: config의 title이 비어 있으면 서버 hostname을 그대로 씀 → 어느 서버든 복사해서 사용 가능
 TITLE = (D.get("title") or "").strip() or socket.gethostname()
 
@@ -56,6 +74,12 @@ EXTRA_FILE = BASE / "services_extra.json"
 # 처음 본 서비스·포트 기록 ("🆕 새로 생긴 것" 판단용)
 SEEN_FILE = BASE / "seen.json"
 EXTRA_LOCK = threading.Lock()
+# 화면에서 [목록외 +]로 목록에서 치운 서비스 이름들 (config.yaml 에 적은 것도 가능, 되돌릴 수 있음)
+HIDDEN_FILE = BASE / "services_hidden.json"
+# 화면에서 [서비스로 보내기]한 내부 전용 포트 (목록에 없는 포트 → 목록에 없는 서비스로 옮김)
+MOVED_FILE = BASE / "ports_moved.json"
+# 화면에서 [Agent 등록]한 Hermes 서비스 (config.yaml 에 hermes 가 없을 때만 채워 줌)
+AGENT_FILE = BASE / "agent_extra.json"
 
 
 def _read_json(path, default):
@@ -75,10 +99,39 @@ def load_extras():
     return [s for s in _read_json(EXTRA_FILE, []) if isinstance(s, dict) and s.get("name")]
 
 
-def all_services():
-    """config.yaml 서비스 + 화면에서 추가한 서비스"""
+def _load_agent_extra():
+    """화면에서 저장해 둔 Agent 값([Agent 등록], 봇 아이디)을 CFG["hermes"] 에 합침 (config.yaml 에 적은 값이 우선)"""
+    saved = _read_json(AGENT_FILE, {})
+    if not isinstance(saved, dict):
+        return
+    cur = CFG.get("hermes") or {}
+    merged = {**{k: v for k, v in saved.items() if k != "bots"}, **cur}
+    bots = {}
+    for k in set(saved.get("bots") or {}) | set(cur.get("bots") or {}):
+        bots[k] = {**((saved.get("bots") or {}).get(k) or {}), **((cur.get("bots") or {}).get(k) or {})}
+    if bots:
+        merged["bots"] = bots
+    ign = sorted({str(x).lower() for x in (saved.get("ignore") or [])} | {str(x).lower() for x in (cur.get("ignore") or [])})
+    if ign:
+        merged["ignore"] = ign
+    if merged.get("unit") or bots or ign:
+        CFG["hermes"] = merged
+
+
+_load_agent_extra()
+
+
+def hidden_names():
+    return {str(x) for x in _read_json(HIDDEN_FILE, []) if x}
+
+
+def all_services(include_hidden=False):
+    """config.yaml 서비스 + 화면에서 추가한 서비스 (목록외로 치운 건 빼고)"""
     out = []
+    hid = set() if include_hidden else hidden_names()
     for s in list(CFG.get("services") or []) + [{**s, "extra": True} for s in load_extras()]:
+        if s.get("name") in hid:
+            continue
         s = dict(s)
         s.setdefault("scope", "system")
         if s["scope"] in ("system", "user"):
@@ -100,6 +153,27 @@ def proc_owner(pid):
         return {"unit": units[-1], "scope": "user"} if units else None
     units = [p for p in parts if p.endswith(".service")]
     return {"unit": units[-1], "scope": "system"} if units else None
+
+
+def short_cmd(pid):
+    """실행 파일 + 스크립트 이름만 (인자에 비밀번호/토큰이 있을 수 있어서 인자는 안 보여줌)"""
+    try:
+        parts = psutil.Process(pid).cmdline()
+    except Exception:
+        return None
+    if not parts:
+        return None
+    exe = os.path.basename(parts[0])
+    script = next((os.path.basename(a) for a in parts[1:] if not a.startswith("-") and "=" not in a), None)
+    return f"{exe} {script}" if script and script != exe else exe
+
+
+def agent_candidate(unit, cmd):
+    """Hermes Agent 서비스로 보이는지 (이름이나 실행 명령에 hermes). 이미 등록됐으면 False"""
+    H = CFG.get("hermes") or {}
+    if not unit or H.get("unit") == unit:
+        return False
+    return "hermes" in f"{unit} {cmd or ''}".lower()
 
 
 def suggest_for(unit=None, user=False, port=None, proc=None):
@@ -254,6 +328,7 @@ def read_hardware():
     gtt_u, gtt_t = read_num(SENS.get("gtt_used")), read_num(SENS.get("gtt_total"))
     return {
         "cpu_pct": psutil.cpu_percent(interval=None),
+        "cpu_threads": psutil.cpu_count(logical=True),
         "gpu_pct": read_num(SENS.get("gpu_busy")) if read_num(SENS.get("gpu_busy")) is not None else gpu_busy_fdinfo(),
         "gpu_mhz": gpu_clock_mhz(),
         "apu_temp": _hw("apu_temp"),
@@ -409,7 +484,7 @@ def read_hermes_state():
     H = CFG.get("hermes") or {}
     home = Path(os.path.expanduser(H.get("home", "~/.hermes")))
     meta = H.get("bots", {})
-    out = {"gateway": None, "bots": []}
+    out = {"gateway": None, "bots": [], "ignored": []}
     try:
         gs = json.loads((home / "gateway_state.json").read_text())
     except Exception:
@@ -421,15 +496,21 @@ def read_hermes_state():
     parked = set((gs.get("parked_profiles") or {}).keys())
 
     # 플랫폼: "thia:mattermost" → thia, 접두사 없으면 default
-    plats = {}
+    plats, ignored = {}, []
+    ign = {str(x).lower() for x in (H.get("ignore") or [])}
     for key, v in (gs.get("platforms") or {}).items():
         prof, _, plat = key.rpartition(":")
         prof = prof or "default"
+        if f"{prof}:{plat}".lower() in ign:        # 사용자가 [숨기기]로 치운 연결 → 표시·경고·알림에서 뺌
+            ignored.append({"key": f"{prof}:{plat}".lower(), "state": v.get("state")})
+            continue
         st = v.get("state")
         lv = "ok" if st == "connected" and not v.get("needs_attention") else (
              "warn" if st in ("connecting", "retrying", "reconnecting") or v.get("retrying_since") else "bad")
         plats.setdefault(prof, []).append({"name": plat.capitalize(), "state": st, "level": lv,
                                            "error": v.get("error_message")})
+
+    out["ignored"] = ignored
 
     # 봇마다 자기 state.db 를 따로 씀: default → ~/.hermes, 나머지 → ~/.hermes/profiles/<이름>
     def prof_dir(prof):
@@ -496,12 +577,19 @@ def read_hermes_state():
         m = meta.get(prof, {})
         pl = plats.get(prof, [])
         a = acts.get(prof, {})
-        level = "bad" if prof in parked else max((p["level"] for p in pl), key=["ok", "warn", "bad"].index, default="ok")
+        level = "bad" if prof in parked else max((p["level"] for p in pl), key=["ok", "warn", "bad"].index, default="off")
         out["bots"].append({"id": prof, "name": m.get("name", prof), "role": m.get("role"),
                             "mm_user": m.get("mattermost"), "tg_user": str(m.get("telegram") or "").lstrip("@") or None,
                             "parked": prof in parked, "level": level, "platforms": pl,
                             "last": a.get("last"), "model": a.get("model"), "today": a.get("today", 0)})
     return out
+
+
+def _agent_cfg():
+    """Agent 탭 화면용: 이 서버에 어떤 부가 기능(MCP 감시·자동 복구)이 설정돼 있는지"""
+    H, W = CFG.get("hermes") or {}, CFG.get("watchdog") or {}
+    return {"unit": H.get("unit"), "mcp_name": W.get("mcp_name"), "mcp_logged": bool(H.get("mcp_pattern")),
+            "watchdog": bool(W and H.get("unit")), "parked_minutes": W.get("parked_minutes", 10)}
 
 
 def read_hermes():
@@ -538,7 +626,7 @@ def read_hermes():
                 st = "bad" if st == "bad" else "warn"
         else:
             errs = [m for _, m in pl if re.search(r"\b(ERROR|CRITICAL)\b", m)]
-            st = "warn" if errs else "ok"
+            st = "warn" if errs else ("ok" if pl else "unknown")      # 로그가 하나도 없으면 "정상"이라고 못 함
         platforms.append({"name": p["name"], "state": st, "fails_1h": fails_1h,
                           "last": last[0] if last else None})
 
@@ -630,7 +718,7 @@ def build_services(ports, urlchecks, llama):
         else:
             exposure = None
         rows.append({
-            "name": s["name"], "scope": s.get("scope"), "port": port,
+            "name": s["name"], "unit": s.get("unit"), "scope": s.get("scope"), "port": port,
             "model": s.get("model"), "used_by": s.get("used_by"), "note": s.get("note"),
             "subdomain": s.get("subdomain"), "access": s.get("access"),
             "exposure": exposure, "listening": p is not None if port else None,
@@ -665,10 +753,41 @@ def build_services(ports, urlchecks, llama):
     for u in unknown:                   # 포트 연 프로그램이 어느 서비스 소속인지 + 추가용 기본값
         own = proc_owner(u["pid"]) if u.get("pid") else None
         u["owner"] = own
+        u["cmd"] = short_cmd(u["pid"]) if u.get("pid") else None
+        # 화면에 보일 이름: systemd 서비스 이름이 있으면 그걸, 없으면 프로그램 이름
+        u["label"] = own["unit"].removesuffix(".service") if own else (u.get("proc") or f"port-{u['port']}")
+        u["kind"] = "service" if own else "manual"
         u["suggest"] = suggest_for(own and own["unit"], own and own["scope"] == "user", u["port"], u.get("proc"))
+        u["agent"] = ({"unit": own["unit"], "scope": own["scope"]}
+                      if own and agent_candidate(own["unit"], u["cmd"]) else None)
     others = other_sys + other_usr
     for o in others:
         o["suggest"] = suggest_for(o["unit"], o.get("user"))
+        o["agent"] = ({"unit": o["unit"], "scope": "user" if o.get("user") else "system"}
+                      if agent_candidate(o["unit"], None) else None)
+    # [목록외 +]로 목록에서 치운 서비스도 "목록에 없는 서비스" 칸에 칩으로 보여 줌 ([목록+] 로 되돌리기)
+    for h in all_services(include_hidden=True):
+        if h["name"] not in hidden_names():
+            continue
+        dup = next((o for o in others if h.get("unit") and o.get("unit") == h["unit"]), None)
+        if dup:
+            dup["restore"] = h["name"]
+            continue
+        others.append({"unit": h.get("unit"), "label": h["name"], "port": h.get("port"), "user": h.get("scope") == "user",
+                       "restore": h["name"], "suggest": None, "agent": None})
+    # [서비스로 보내기]한 내부 전용 포트는 "목록에 없는 포트"에서 빼서 "목록에 없는 서비스"로 옮김
+    moved = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
+    keep = []
+    for u in unknown:
+        if u["port"] in moved and u["exposure"] == "internal":
+            unit = u["owner"]["unit"] if u.get("owner") else None
+            if unit and any(o.get("unit") == unit for o in others):
+                continue                        # 이미 서비스 칸에 있으니 포트 줄만 없앰
+            others.append({"unit": unit, "label": u["label"], "port": u["port"], "user": bool(u.get("owner") and u["owner"]["scope"] == "user"),
+                           "moved": True, "suggest": u["suggest"], "agent": u["agent"]})
+        else:
+            keep.append(u)
+    unknown = keep
     return rows, unknown, others, failed
 
 
@@ -677,7 +796,7 @@ def detect_new(unknown, others, now):
     돌려주는 것: (새로 생긴 것 목록, 처리한(추가/넘기기) 이름표 모음)"""
     with EXTRA_LOCK:
         seen = _read_json(SEEN_FILE, {})
-        units = {o["unit"]: o for o in others}
+        units = {o["unit"]: o for o in others if o.get("unit") and not o.get("restore")}   # 직접 띄운 것·치워 둔 서비스는 새것으로 안 침
         lan = {u["port"]: u for u in unknown if u["exposure"] == "lan"}
         if not seen.get("init"):
             seen = {"init": now, "units": {k: now for k in units},
@@ -921,6 +1040,7 @@ def collect_once():
     snap = {
         "server_time": now, "boot_time": psutil.boot_time(), "hostname": socket.gethostname(), "ip": primary_ip(),
         "agent_enabled": bool((CFG.get("hermes") or {}).get("unit")),
+        "agent_cfg": _agent_cfg(),
         "overall": overall, "badges": badges, "hw": hw, "llama": llama,
         "services": services, "unknown_ports": unknown, "other_services": others,
         "failed": failed, "new_items": new_items, "acked": acked, "acked_count": len(acked), "metric_acks": macks, "hermes": hz,
@@ -960,7 +1080,7 @@ def index():
     open_cfg = {"team": op.get("team"), "server": op.get("server"), "server_office": op.get("server_office"),
                 "at_office": bool(op.get("office_ip")) and ip == op.get("office_ip")}
     return render_template("index.html", title=TITLE, refresh=D.get("refresh_seconds", 5), open_cfg=open_cfg,
-                           version=D.get("version", ""), author=D.get("author", ""), updated=D.get("updated", ""))
+                           version=APP_VERSION, author=D.get("author", ""), updated=D.get("updated", ""))
 
 
 @app.get("/manifest.webmanifest")
@@ -1073,6 +1193,10 @@ def api_services_add():
     if scope == "manual" and not port:
         return jsonify({"ok": False, "error": "직접 띄운 프로그램은 포트가 있어야 켜졌는지 알 수 있어"}), 400
     with EXTRA_LOCK:
+        if name in hidden_names():                      # 목록외로 치워 둔 서비스면 새로 만들지 않고 되돌림
+            _write_json(HIDDEN_FILE, sorted(hidden_names() - {name}))
+            WAKE.set()
+            return jsonify({"ok": True})
         if any(s["name"] == name for s in all_services()):
             return jsonify({"ok": False, "error": f"'{name}' 은(는) 이미 목록에 있어"}), 400
         entry = {"name": name, "scope": scope, "added": time.time()}
@@ -1091,6 +1215,133 @@ def api_services_add():
         mark_handled(str(b["key"]))
     if port:
         _slow["ports_at"] = 0           # 포트 상태 바로 다시 읽기
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/agent/register")
+def api_agent_register():
+    """[Agent 등록]: 확인된 Hermes 서비스를 Agent 탭에 바로 연결 (agent_extra.json 에 저장, 재시작 X)"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    unit, scope = str(b.get("unit") or ""), str(b.get("scope") or "")
+    if not re.fullmatch(r"[A-Za-z0-9@._:\-]+\.service", unit) or scope not in ("system", "user"):
+        return jsonify({"ok": False, "error": "서비스 이름이나 종류가 이상해"}), 400
+    snap = STATE["snapshot"] or {}
+    cands = [x["agent"] for x in (snap.get("unknown_ports") or []) + (snap.get("other_services") or []) if x.get("agent")]
+    if not any(c["unit"] == unit and c["scope"] == scope for c in cands):
+        return jsonify({"ok": False, "error": "지금 화면에 Agent 후보로 보이는 서비스만 등록할 수 있어"}), 400
+    data = {"unit": unit, "scope": scope, "home": "~/.hermes", "log_window_hours": 6}
+    with EXTRA_LOCK:
+        _write_json(AGENT_FILE, data)
+        CFG["hermes"] = {**data, **(CFG.get("hermes") or {})}
+    _slow["hermes_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/ports/move")
+def api_ports_move():
+    """내부 전용 포트를 '목록에 없는 서비스'로 보내기 / 다시 포트 목록으로 되돌리기"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    try:
+        port = int(b.get("port"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "포트 번호가 이상해"}), 400
+    on = bool(b.get("on", True))
+    if on:
+        cur = next((u for u in (STATE["snapshot"] or {}).get("unknown_ports") or [] if u["port"] == port), None)
+        if not cur or cur.get("exposure") != "internal":
+            return jsonify({"ok": False, "error": "내부 전용 포트만 서비스 칸으로 보낼 수 있어 (사내망 포트는 인지로 처리해 줘)"}), 400
+    with EXTRA_LOCK:
+        cur_list = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
+        (cur_list.add if on else cur_list.discard)(port)
+        _write_json(MOVED_FILE, sorted(cur_list))
+    _slow["ports_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/agent/ignore")
+def api_agent_ignore():
+    """봇의 메신저 연결 하나를 화면·경고·알림에서 숨기기(on=true) / 되돌리기(on=false). 형식 '봇:플랫폼' (예: default:telegram)"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    key, on = str(b.get("key") or "").lower().strip(), bool(b.get("on", True))
+    hz = (STATE["snapshot"] or {}).get("hermes") or {}
+    known = {f"{bot['id']}:{p['name']}".lower() for bot in hz.get("bots", []) for p in bot.get("platforms", [])}
+    known |= {x["key"] for x in hz.get("ignored", [])}
+    if key not in known:
+        return jsonify({"ok": False, "error": "그런 연결이 화면에 없어"}), 400
+    with EXTRA_LOCK:
+        saved = _read_json(AGENT_FILE, {})
+        if not isinstance(saved, dict):
+            saved = {}
+        cur = {str(x).lower() for x in (saved.get("ignore") or [])}
+        (cur.add if on else cur.discard)(key)
+        saved["ignore"] = sorted(cur)
+        _write_json(AGENT_FILE, saved)
+        H = CFG.setdefault("hermes", {})
+        allc = {str(x).lower() for x in (H.get("ignore") or [])}
+        (allc.add if on else allc.discard)(key)
+        H["ignore"] = sorted(allc)
+    _slow["hermes_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/agent/bot")
+def api_agent_bot():
+    """봇 카드의 [Telegram] 칩을 눌러 봇 아이디를 알려 주면 저장 → 다음부터 칩을 누르면 텔레그램이 열려"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    bid, tg = str(b.get("id") or ""), str(b.get("telegram") or "").strip().lstrip("@")
+    ids = {x["id"] for x in ((STATE["snapshot"] or {}).get("hermes") or {}).get("bots", [])}
+    if bid not in ids:
+        return jsonify({"ok": False, "error": "그런 봇이 화면에 없어"}), 400
+    if tg and not re.fullmatch(r"[A-Za-z0-9_]{3,64}", tg):
+        return jsonify({"ok": False, "error": "텔레그램 봇 아이디는 영문·숫자·_ 만 쓸 수 있어 (예: my_bot)"}), 400
+    with EXTRA_LOCK:
+        saved = _read_json(AGENT_FILE, {})
+        if not isinstance(saved, dict):
+            saved = {}
+        bots = saved.setdefault("bots", {})
+        bots.setdefault(bid, {})
+        if tg:
+            bots[bid]["telegram"] = tg
+        else:
+            bots[bid].pop("telegram", None)
+        _write_json(AGENT_FILE, saved)
+        cur = CFG.setdefault("hermes", {}).setdefault("bots", {})
+        cur.setdefault(bid, {})
+        if tg:
+            cur[bid]["telegram"] = tg
+        else:
+            cur[bid].pop("telegram", None)
+    _slow["hermes_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/services/hide")
+def api_services_hide():
+    """목록의 서비스를 '목록에 없는 서비스' 칸으로 치우기(on=true) / 되돌리기(on=false). config.yaml 것도 가능"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    name, on = str(b.get("name") or ""), bool(b.get("on", True))
+    with EXTRA_LOCK:
+        if not any(x["name"] == name for x in all_services(include_hidden=True)):
+            return jsonify({"ok": False, "error": "그런 서비스가 목록에 없어"}), 400
+        cur = hidden_names()
+        (cur.add if on else cur.discard)(name)
+        _write_json(HIDDEN_FILE, sorted(cur))
+    _slow["ports_at"] = 0
     WAKE.set()
     return jsonify({"ok": True})
 
@@ -1125,14 +1376,67 @@ def api_services_skip():
 
 @app.post("/api/notify/test")
 def api_notify_test():
-    """[테스트 알림 보내기] 버튼. secrets.yaml 을 새로 읽어서 바로 보내 봄"""
+    """[테스트 알림 보내기] 버튼. 받을 곳 하나(id)만, 또는 전부 바로 보내 봄"""
     if not request.is_json:
         return jsonify({"ok": False, "error": "json only"}), 415
-    if not NOTIFY.channels():
-        return jsonify({"ok": False, "error": "secrets.yaml 에 받을 곳(웹훅 주소/봇 토큰)이 아직 없어"}), 400
-    entry = NOTIFY.test()
+    only = str((request.get_json(silent=True) or {}).get("id") or "") or None
+    if not NOTIFY.channels() or (only and only not in NOTIFY.channels()):
+        return jsonify({"ok": False, "error": "보낼 수 있는 받을 곳이 없어 (추가했는지, 켜져 있는지 확인해 줘)"}), 400
+    entry = NOTIFY.test(only)
     WAKE.set()
     return jsonify({"ok": entry["ok"], "results": entry["results"]})
+
+
+def _can_save_secrets():
+    """웹훅 주소·토큰을 저장해도 되는 접속인지:
+    HTTPS(터널 포함) / 서버 자기 자신 / 같은 사내망·집 네트워크(사설 IP, 프록시 없이 직접) 이거나, 설정으로 허용한 경우"""
+    import ipaddress
+    if (CFG.get("notify") or {}).get("allow_insecure_edit"):
+        return True
+    if _secure_enough() or "https" in (request.headers.get("CF-Visitor", "").lower()):
+        return True
+    if request.headers.get("X-Forwarded-For") or request.headers.get("CF-Connecting-IP"):
+        return False                                   # 프록시를 거쳐 온 http → 바깥에서 온 걸 수 있어
+    try:
+        ip = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return False
+    return ip.is_private or ip in ipaddress.ip_network("100.64.0.0/10")    # 사설 IP, Tailscale
+
+
+@app.post("/api/notify/channel")
+def api_notify_channel():
+    """받을 곳 추가/수정/삭제 (action: save | delete). 웹훅 주소·토큰이 오가니까 HTTPS(또는 localhost)에서만"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    if b.get("action") != "delete" and not _can_save_secrets():
+        return jsonify({"ok": False, "error": "지금 접속 방식(http, 인터넷 쪽)에서는 웹훅 주소·토큰을 저장할 수 없어. "
+                        "① 서버 자기 자신(http://127.0.0.1:포트)이나 같은 사내망/집 네트워크에서 열거나 ② HTTPS 주소로 열어 줘. "
+                        "(정말 괜찮으면 config.yaml 의 notify 아래에 allow_insecure_edit: true)"}), 400
+    try:
+        if b.get("action") == "delete":
+            NOTIFY.delete_channel(str(b.get("id") or ""))
+            cid = None
+        else:
+            cid = NOTIFY.save_channel(b)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    WAKE.set()
+    return jsonify({"ok": True, "id": cid})
+
+
+@app.post("/api/notify/settings")
+def api_notify_settings():
+    """알림 규칙(켜기/대기 시간/쿨다운/해결 알림/링크/음소거)을 화면에서 바꿀 때. 바로 적용돼 (재시작 X)"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    try:
+        r = NOTIFY.set_settings(request.get_json(silent=True) or {})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    WAKE.set()
+    return jsonify({"ok": True, "settings": r})
 
 
 @app.post("/api/notify/quiet")

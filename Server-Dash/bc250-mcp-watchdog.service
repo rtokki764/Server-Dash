@@ -1,5 +1,5 @@
 [Unit]
-Description=mypc MCP 자동 복구 (parked 상태면 hermes-gateway 재시작)
+Description=Hermes MCP 자동 복구 (parked 상태면 게이트웨이 재시작, 설정이 있을 때만 켜짐)
 
 [Service]
 Type=oneshot

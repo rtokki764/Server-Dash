@@ -90,6 +90,17 @@
   .qform input[type=time] { font: inherit; font-size: 14px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
                             background: var(--panel); color: var(--fg); color-scheme: light dark; }
   .qform.off .qopt { opacity: .45; }
+  .qform input[type=number], .qform input[type=text] { font: inherit; font-size: 14px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
+                            background: var(--panel); color: var(--fg); }
+  .qform input[type=number] { width: 70px; }
+  .qform input[type=text] { min-width: 200px; flex: 1; max-width: 360px; }
+  .mute-x { appearance: none; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 0 0 4px; }
+  .chlist { display: flex; flex-direction: column; gap: 6px; }
+  .chrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chrow .chn { flex: 1; min-width: 140px; }
+  .chrow .chn small { color: var(--muted); }
+  .chrow .cha { display: inline-flex; align-items: center; gap: 6px; }
+  .mbox select { font: inherit; font-size: 15px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
   .saved { color: var(--ok); font-size: 12px; font-weight: 600; }
   .svc .tg { margin-left: auto; }
   .newc { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
@@ -164,6 +175,8 @@
   .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 7px; padding: 4px 10px; font-size: 13px; }
   .chip small { color: var(--muted); }
   a.chip { color: inherit; text-decoration: none; cursor: pointer; }
+  button.chip { border: 0; font: inherit; font-size: 13px; color: inherit; cursor: pointer; }
+  .chip .go { color: var(--muted); font-size: 11px; }
   a.chip:hover { outline: 1px solid var(--muted); }
   a.chip .go { color: var(--muted); font-size: 11px; margin-left: -2px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; display: inline-block; }
@@ -393,11 +406,24 @@
     <div class="btns"><button type="button" class="btn ghost" id="am-cancel">취소</button><button type="button" class="btn" id="am-ok">추가</button></div>
   </div>
 </div>
+<!-- 받을 곳 추가/수정 창 -->
+<div id="chModal" class="modal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true">
+    <h3 id="ch-title">받을 곳 추가</h3>
+    <label>종류<select id="ch-type"></select></label>
+    <label>이름 (알림 목록에 보일 이름)<input type="text" id="ch-name" maxlength="40"></label>
+    <div id="ch-fields" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="info" id="ch-help"></div>
+    <div class="err" id="ch-err" hidden></div>
+    <div class="btns"><button type="button" class="btn ghost" id="ch-del" hidden style="margin-right:auto">삭제</button>
+      <button type="button" class="btn ghost" id="ch-cancel">취소</button><button type="button" class="btn" id="ch-ok">저장</button></div>
+  </div>
+</div>
 <script>
 const REFRESH = {{ refresh }} * 1000;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const TZ = "Asia/Seoul";
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";   // 보는 사람(브라우저)의 시간대
 const OPEN = {{ open_cfg | tojson }};
 const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 // 봇 대화방을 앱으로 바로 여는 주소 (없으면 null → 그냥 칩)
@@ -406,10 +432,11 @@ function appLink(bot, plat) {
     const host = (!IS_MOBILE && OPEN.at_office && OPEN.server_office) ? OPEN.server_office : OPEN.server;
     return host ? `mattermost://${host}/${OPEN.team}/messages/@${bot.mm_user}` : null;
   }
-  if (plat === "Telegram") return bot.tg_user ? `tg://resolve?domain=${bot.tg_user}` : null;
+  if (plat === "Telegram") return bot.tg_user ? `https://t.me/${bot.tg_user}` : null;
   return null;
 }
 // 칩: 링크가 있으면 누를 수 있게 <a>
+const ignoreBtn = (botId, plat) => `<button type="button" class="btn mini ghost" data-pignore="${esc(botId)}:${esc(plat.toLowerCase())}" title="이 서버에서 안 쓰는 연결이면 화면·경고·알림에서 숨겨 (되돌릴 수 있어)">숨기기</button>`;
 function linkChip(href, inner, title) {
   return href ? `<a class="chip" href="${esc(href)}" title="${esc(title)}">${inner}<span class="go">↗</span></a>` : `<span class="chip">${inner}</span>`;
 }
@@ -482,8 +509,8 @@ function render() {
   // hermes 설정이 없는 서버는 Agent 탭을 숨김
   document.querySelectorAll('[data-tab="hermes"]').forEach((b) => { b.style.display = S.agent_enabled === false ? "none" : ""; });
   $("uptime").title = "부팅: " + new Date(S.boot_time * 1000).toLocaleString("ko-KR", {timeZone: TZ});
-  $("badges").innerHTML = S.badges.map((b) => `<span class="badge ${b.level}">${esc(b.text)}</span>`).join("") +
-    (S.acked || []).map((a) => `<span class="badge ack" data-goto="${a.tab}" title="인지함 · 눌러서 보기">✓ ${esc(a.text)}</span>`).join("");
+  // 인지한 건 상단에서 뺌 (각 항목의 인지 스위치는 해당 칸에 그대로 있어서 거기서 끄면 돼)
+  $("badges").innerHTML = S.badges.map((b) => `<span class="badge ${b.level}">${esc(b.text)}</span>`).join("");
   renderOverview(); renderHermes(); renderServices(); renderMobile(); tick();
 }
 
@@ -502,38 +529,43 @@ function renderOverview() {
       ${pct != null ? `<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}
     </div>`;
   $("tiles").innerHTML = [
-    tile("GPU", f0(h.gpu_pct), "%", h.gen_tps ? `생성 ${f1(h.gen_tps)} tok/s` : (h.gpu_mhz != null ? `클럭 ${f0(h.gpu_mhz)} MHz` : "—"), h.gpu_pct, "ok"),
-    tile("CPU", f0(h.cpu_pct), "%", "16스레드 평균", h.cpu_pct, "ok"),
-    tile("APU 온도", f1(h.apu_temp), "°C", `한계 ${T.apu_temp_c.bad}°C`, h.apu_temp != null ? h.apu_temp / T.apu_temp_c.bad * 100 : null, lvl(h.apu_temp, T.apu_temp_c)),
+    h.gpu_pct != null ? tile("GPU", f0(h.gpu_pct), "%", h.gen_tps ? `생성 ${f1(h.gen_tps)} tok/s` : (h.gpu_mhz != null ? `클럭 ${f0(h.gpu_mhz)} MHz` : "—"), h.gpu_pct, "ok") : "",
+    tile("CPU", f0(h.cpu_pct), "%", h.cpu_threads ? `${h.cpu_threads}스레드 평균` : "평균", h.cpu_pct, "ok"),
+    h.apu_temp != null ? tile("APU 온도", f1(h.apu_temp), "°C", `한계 ${T.apu_temp_c.bad}°C`, h.apu_temp / T.apu_temp_c.bad * 100, lvl(h.apu_temp, T.apu_temp_c)) : "",
     tile("메모리", f1(h.mem_used), "GB", `${f1(h.mem_total)} GB 중 ${f0(h.mem_pct)}%`, h.mem_pct, mlv("mem_pct", lvl(h.mem_pct, T.mem_pct)), ackBtn("mem_pct", lvl(h.mem_pct, T.mem_pct))),
     tile("스왑", f1(h.swap_used), "GB", `${f1(h.swap_total)} GB 중 ${f0(h.swap_pct)}%`, h.swap_pct, mlv("swap_pct", lvl(h.swap_pct, T.swap_pct)), ackBtn("swap_pct", lvl(h.swap_pct, T.swap_pct))),
     tile("디스크", f0(h.disk_used), "GB", `${f0(h.disk_total)} GB 중 ${f0(h.disk_pct)}%`, h.disk_pct, mlv("disk_pct", lvl(h.disk_pct, T.disk_pct)), ackBtn("disk_pct", lvl(h.disk_pct, T.disk_pct))),
   ].join("");
   const vram = h.vram_used != null ? `<b>${f1(h.vram_used)}</b> / ${f1(h.vram_total)} GB` : "—";
   const gtt = h.gtt_used != null ? `<b>${f1(h.gtt_used)}</b> / ${f1(h.gtt_total)} GB` : "—";
+  // 이 서버에서 못 읽는 센서는 "—" 로 채우지 않고 아예 뺌
   $("strip").innerHTML = [
-    `APU 전력 <b>${f1(h.apu_power)}</b> W`, `GPU 온도 <b>${f1(h.gpu_temp)}</b>°C`, `GPU 클럭 <b>${f0(h.gpu_mhz)}</b> MHz`,
-    `펌프 팬 <b>${f0(h.pump_rpm)}</b> RPM`, `VRAM ${vram}`, `GTT ${gtt}`,
-  ].map((x) => `<span>${x}</span>`).join("");
+    h.apu_power != null && `APU 전력 <b>${f1(h.apu_power)}</b> W`, h.gpu_temp != null && `GPU 온도 <b>${f1(h.gpu_temp)}</b>°C`,
+    h.gpu_mhz != null && `GPU 클럭 <b>${f0(h.gpu_mhz)}</b> MHz`, h.pump_rpm != null && `펌프 팬 <b>${f0(h.pump_rpm)}</b> RPM`,
+    h.vram_used != null && `VRAM ${vram}`, h.gtt_used != null && `GTT ${gtt}`,
+  ].filter(Boolean).map((x) => `<span>${x}</span>`).join("");
   drawCharts();
 }
 
 // ── 그래프 (SVG 직접 그리기) ──
 const CHARTS = [
-  {key: "gpu_pct", title: "GPU", unit: "%", min: 0, max: 100},
+  {key: "gpu_pct", title: "GPU", unit: "%", min: 0, max: 100, optional: true},
   {key: "cpu_pct", title: "CPU", unit: "%", min: 0, max: 100},
-  {key: "apu_temp", title: "APU 온도", unit: "°C", min: 30, max: 100, ref: () => S?.thresholds.apu_temp_c.bad},
+  {key: "apu_temp", title: "APU 온도", unit: "°C", min: 30, max: 100, optional: true, ref: () => S?.thresholds.apu_temp_c.bad},
   {key: "mem_pct", title: "메모리", unit: "%", min: 0, max: 100},
   {key: "swap_pct", title: "스왑", unit: "%", min: 0, max: 100, ref: () => S?.thresholds.swap_pct.bad},
-  {key: "apu_power", title: "APU 전력", unit: "W", min: 0, max: null},
+  {key: "apu_power", title: "APU 전력", unit: "W", min: 0, max: null, optional: true},
 ];
 function drawCharts() {
   const box = $("charts");
   if ($("tab-overview").hidden) return;
-  if (!box.children.length) {
-    box.innerHTML = CHARTS.map((c) => `<div class="card chart"><h3>${c.title} <span id="cv-${c.key}"></span></h3><div class="plot" id="pl-${c.key}"></div></div>`).join("");
+  const have = CHARTS.filter((c) => !c.optional || H.some((p) => p[c.key] != null));
+  const sig = have.map((c) => c.key).join();
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    box.innerHTML = have.map((c) => `<div class="card chart"><h3>${c.title} <span id="cv-${c.key}"></span></h3><div class="plot" id="pl-${c.key}"></div></div>`).join("");
   }
-  CHARTS.forEach((c) => line($("pl-" + c.key), c));
+  have.forEach((c) => line($("pl-" + c.key), c));
 }
 function line(el, c) {
   const pts = H.filter((p) => p[c.key] != null).map((p) => [p.t, p[c.key]]);
@@ -580,11 +612,13 @@ window.addEventListener("resize", () => { clearTimeout(window._rz); window._rz =
 // ── Hermes ──
 function renderHermes() {
   const hz = S.hermes || {};
-  const gw = S.services.filter((s) => ["hermes-gateway", "hermes-serve", "mcphub"].includes(s.name));
+  const ac = S.agent_cfg || {};
+  // 게이트웨이 줄: 등록한 Agent 서비스(+ 예전부터 쓰던 이름들)만
+  const gw = S.services.filter((s) => (ac.unit && s.unit === ac.unit) || ["hermes-gateway", "hermes-serve", "mcphub"].includes(s.name));
   const chip = (st, name, small = "") => `<span class="chip"><span class="dot ${st}"></span>${esc(name)}${small ? ` <small>${esc(small)}</small>` : ""}</span>`;
   const logPlat = Object.fromEntries((hz.platforms || []).map((p) => [p.name, p]));
-  const plat = (hz.platforms || []).map((p) => chip(p.state, p.name,
-    p.state === "ok" ? (p.fails_1h ? `재연결 ${p.fails_1h}회/시간` : "정상") : `${p.state === "bad" ? "끊김" : "불안정"} · 최근 1시간 재연결 ${p.fails_1h}회`));
+  const plat = (hz.platforms || []).map((p) => p.state === "unknown" ? chip("off", p.name, "기록 없음") : chip(p.state, p.name,
+    p.state === "ok" ? (p.fails_1h ? `재연결 ${p.fails_1h}회/시간` : (p.last ? "정상" : "이상 기록 없음")) : `${p.state === "bad" ? "끊김" : "불안정"} · 최근 1시간 재연결 ${p.fails_1h}회`));
   // 봇 카드 (gateway_state.json + state.db)
   const bots = hz.bots || [];
   $("bots").innerHTML = bots.map((b) => {
@@ -592,8 +626,11 @@ function renderHermes() {
       const lp = logPlat[p.name];
       const extra = lp && lp.fails_1h ? ` · 재연결 ${lp.fails_1h}회/시간` : "";
       const lv = p.level === "ok" && lp && lp.state !== "ok" ? lp.state : p.level;
-      return linkChip(appLink(b, p.name), `<span class="dot ${lv}"></span>${esc(p.name)} <small>${esc((p.state === "connected" ? "연결됨" : p.state) + extra)}</small>`,
-        `${p.name} 앱에서 ${b.name} 대화방 열기`);
+      const inner = `<span class="dot ${lv}"></span>${esc(p.name)} <small>${esc((p.state === "connected" ? "연결됨" : p.state) + extra)}</small>`;
+      const href = appLink(b, p.name);
+      if (!href && p.name === "Telegram")      // 봇 아이디를 모르면 눌러서 알려 주게
+        return `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 이 봇의 텔레그램 아이디를 알려 주면, 다음부터 이 칩으로 대화방이 열려">${inner}<span class="go">＋아이디</span></button>` + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
+      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
     }).join("") || '<span class="empty">연결된 메신저 없음</span>';
     return `<div class="card bot ${b.level}">
       <div class="top"><span class="dot ${b.level}"></span><span class="nm">${esc(b.name)}</span><span class="rl">${esc(b.role || "")}</span>${b.parked ? '<span class="tag" style="color:var(--bad)">parked</span>' : ""}</div>
@@ -602,18 +639,22 @@ function renderHermes() {
       <div class="chips">${pl}</div></div>`;
   }).join("");
   const wdl = (hz.watchdog || []).slice(-1)[0];
-  const wd = wdl ? `<div class="sub">🔧 자동 복구 · ${esc(ago(wdl.t))} · ${esc(wdl.msg)}</div>` : `<div class="sub">🔧 자동 복구 대기 중 (10분 넘게 끊기면 hermes-gateway 재시작)</div>`;
+  const unitName = (ac.unit || "").replace(/\.service$/, "") || "게이트웨이";
+  // 자동 복구 줄은 watchdog 설정이 있는 서버에서만
+  const wd = !ac.watchdog ? "" : wdl ? `<div class="sub">🔧 자동 복구 · ${esc(ago(wdl.t))} · ${esc(wdl.msg)}</div>`
+    : `<div class="sub">🔧 자동 복구 대기 중 (${ac.parked_minutes}분 넘게 끊기면 ${esc(unitName)} 재시작)</div>`;
   const gwInfo = hz.gateway ? `응답 ${ago(hz.gateway.heartbeat)} · v${esc(hz.gateway.version || "?")} · 처리 중 ${hz.gateway.active_agents ?? 0}` : "";
   const mcp = (hz.mcp || []).map((m) => chip(m.level, m.name, m.state === "connected" ? "연결됨" : `${m.state} · ${hm(m.at)}부터`));
   const grp = (hz.groups || []).sort((a, b) => b.count - a.count).map((g) => chip("warn", g.label, `${g.count}회 · 마지막 ${hm(g.last)}`));
   $("hermes-rows").innerHTML = `
-    <div class="row"><div class="k">게이트웨이</div><div><div class="chips">${gw.map((s) => chip(s.state, s.name, s.since ? dur(Date.now() / 1000 + offset - s.since) : "")).join("")}</div>${gwInfo ? `<div class="sub">${gwInfo}</div>` : ""}</div></div>
+    <div class="row"><div class="k">게이트웨이</div><div><div class="chips">${gw.map((s) => chip(s.state, s.name, s.since ? dur(Date.now() / 1000 + offset - s.since) : "")).join("") || (hz.gateway ? chip(/run|connect|ok|active/i.test(hz.gateway.state || "") ? "ok" : "warn", unitName, hz.gateway.state || "") : '<span class="empty">기록 없음</span>')}</div>${gwInfo ? `<div class="sub">${gwInfo}</div>` : ""}</div></div>
     ${bots.length ? "" : `<div class="row"><div class="k">메신저 연결</div><div class="chips">${plat.join("") || '<span class="empty">기록 없음</span>'}</div></div>`}
-    <div class="row"><div class="k">MCP 서버</div><div><div class="chips">${mcp.join("") || chip("ok", "mypc", "연결됨")}</div>${wd}</div></div>
+    ${mcp.length || ac.mcp_name || ac.mcp_logged ? `<div class="row"><div class="k">MCP 서버</div><div><div class="chips">${mcp.join("") || (ac.mcp_name ? chip("ok", ac.mcp_name, "이상 기록 없음") : '<span class="empty">기록 없음</span>')}</div>${wd}</div></div>` : ""}
+    ${(hz.ignored || []).length ? `<div class="row"><div class="k">숨긴 연결</div><div class="chips">${hz.ignored.map((x) => `<span class="chip">${esc(x.key)} <small>${esc(x.state || "")}</small><button type="button" class="mute-x" data-pignore="${esc(x.key)}" data-off="1" title="다시 보이기">되돌리기</button></span>`).join("")}</div></div>` : ""}
     <div class="row"><div class="k">최근 ${hz.window_h || 6}시간 경고</div><div class="chips">${grp.join("") || '<span class="empty">경고 없음</span>'}</div></div>`;
   $("hermes-log").innerHTML = (hz.tail || []).slice().reverse().map((l) =>
     `<div class="${esc(l.level)}"><span class="t">${hms(l.t)}</span>${esc(l.msg)}</div>`).join("") || '<span class="empty">로그 없음</span>';
-  const n = (hz.platforms || []).filter((p) => p.state !== "ok").length + (hz.mcp || []).filter((m) => m.level !== "ok").length + bots.filter((b) => b.level !== "ok").length;
+  const n = (hz.platforms || []).filter((p) => p.state !== "ok" && p.state !== "unknown").length + (hz.mcp || []).filter((m) => m.level !== "ok").length + bots.filter((b) => b.level !== "ok" && b.level !== "off").length;
   const bad = (hz.platforms || []).some((p) => p.state === "bad") || (hz.mcp || []).some((m) => m.level === "bad") || bots.some((b) => b.level === "bad");
   $("cnt-hermes").hidden = !n; $("cnt-hermes").textContent = n; $("cnt-hermes").className = "cnt" + (bad ? " bad" : "");
 }
@@ -640,7 +681,8 @@ function renderServices() {
     const stateCell = [
       scopeTag || '<span class="tag">system</span>',
       s.optional ? '<span class="tag">선택</span>' : "",
-      s.extra ? `<span class="tag">화면 추가</span><button type="button" class="btn mini ghost" data-rmsvc="${esc(s.name)}" title="목록에서 빼기">빼기</button>` : "",
+      s.extra ? '<span class="tag">화면 추가</span>' : "",
+      hideBtn(s),
       s.restarts ? `<span class="tag" title="재시작 횟수">재시작 ${s.restarts}회</span>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -659,21 +701,27 @@ function renderServices() {
   $("unknown-sum").textContent = `${unkLan ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개${unkLan ? " · 알고 있는 포트면 인지 켜기" : unk.some((u) => u.acked) ? " · 사내망 포트는 인지함" : " · 전부 내부 전용이라 안전"}`;
   $("unknown-body").innerHTML = `<table class="tbl"><tbody>${unk.map((u) => `<tr><td class="port">${u.port}</td>
       <td><span class="exp ${u.exposure}">${icon[u.exposure]} ${word[u.exposure]}</span></td>
-      <td>${esc(u.proc || "?")} <span class="empty">pid ${u.pid ?? "?"}</span>${u.acked ? ' <span class="ackt">인지됨</span>' : ""}</td>
-      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${addBtn(u.suggest)}${portAck(u)}</span></td></tr>`).join("")}</tbody></table>`;
+      <td>${portName(u)}${u.acked ? ' <span class="ackt">인지됨</span>' : ""}</td>
+      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${agentBtn(u.agent)}${addBtn(u.suggest)}${moveBtn(u)}${portAck(u)}</span></td></tr>`).join("")}</tbody></table>`;
   $("new-wrap").innerHTML = (S.new_items || []).length ? `<h2>🆕 새로 생긴 것 <span style="color:var(--muted);font-weight:500;font-size:13px">설치 뒤 처음 보는 서비스·사내망 포트 · 목록에 올리거나 넘겨 줘</span></h2>
     <div class="card newc">${newRows(S.new_items)}</div>` : "";
 
   const others = S.other_services || [], failed = S.failed || [];
   const live = failed.filter((f) => !f.acked);
   $("failed-det").hidden = !failed.length;
-  $("failed-sum").textContent = `${live.length ? "⚠ " : ""}실패한 서비스 ${failed.length}개 · 알고 있는 문제면 인지를 켜 줘`;
+  $("failed-sum").textContent = live.length
+    ? `⚠ 실패한 서비스 ${failed.length}개 · 알고 있는 문제면 인지를 켜 줘`
+    : `실패한 서비스 ${failed.length}개 · 모두 인지함`;
   $("failed-body").innerHTML = failedRows(failed);
+  // 전부 인지했으면 볼일 없으니 서비스 탭 맨 아래로, 새 문제가 생기면 다시 위(알림 위)로
+  const fdet = $("failed-det"), tabSvc = $("tab-services");
+  if (!live.length) { if (tabSvc.lastElementChild !== fdet) tabSvc.appendChild(fdet); }
+  else if (fdet.nextElementSibling !== $("notify-det")) tabSvc.insertBefore(fdet, $("notify-det"));
   $("notify-sum").textContent = `🔔 알림 · ${notifyHead(S.notify)}`;
   if (!qBusy) $("notify-body").innerHTML = notifyBody(S.notify);
   // 목록에 없는 서비스 (접힌 카드 · 이름 옆 + 버튼으로 바로 목록에 추가)
   $("others-sum").textContent = `목록에 없는 서비스 ${others.length}개 · 보고 싶은 건 + 로 올려 줘`;
-  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}</span>`).join("");
+  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${o.restore ? `<button type="button" class="btn mini" data-hide="${esc(o.restore)}" data-off="1" title="다시 서비스 목록에 올리기">목록+</button>` : addBtn(o.suggest)}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("");
   const newPorts = new Set((S.new_items || []).map((it) => it.port).filter(Boolean));
   const n = S.services.filter((s) => (s.state === "warn" || s.state === "bad") && !s.acked).length + unk.filter((u) => u.exposure === "lan" && !u.acked && !newPorts.has(u.port)).length + live.length + (S.new_items || []).length;
   const bad = S.services.some((s) => s.state === "bad" && !s.acked) || live.length;
@@ -684,8 +732,12 @@ function renderServices() {
 function notifyBody(n) {
   if (!n) return '<span class="empty">알림 정보 없음</span>';
   const R = n.rules, sec = (x) => x >= 3600 ? `${Math.floor(x / 3600)}시간 ${Math.round(x % 3600 / 60)}분` : x >= 60 ? `${Math.round(x / 60)}분` : `${x}초`;
-  const ch = (on, name) => `<span class="chip"><span class="dot ${on ? "ok" : "off"}"></span>${name} <small>${on ? "설정됨" : "미설정"}</small></span>`;
-  const anyCh = n.channels.mattermost || n.channels.telegram;
+  const anyCh = n.channels.some((c) => c.enabled && c.ok);
+  const chRow = (c) => `<div class="chrow"><span class="dot ${c.enabled && c.ok ? "ok" : "off"}"></span>
+      <span class="chn"><b>${esc(c.name)}</b> <small>${esc(c.label)}${c.legacy ? " · secrets.yaml" : ""}${!c.ok ? " · 입력 덜 됨" : c.enabled ? "" : " · 꺼짐"}</small></span>
+      <span class="cha">${tg(`data-chtg="${esc(c.id)}"`, c.enabled, "", "sm")}
+        <button type="button" class="btn mini ghost" data-chtest="${esc(c.id)}" ${c.enabled && c.ok ? "" : "disabled"}>테스트</button>
+        ${c.legacy ? "" : `<button type="button" class="btn mini ghost" data-chedit="${esc(c.id)}">수정</button>`}</span></div>`;
   const stText = (it) => ({
     waiting: `대기 중 · ${sec(it.left)} 뒤 전송`, cooldown: `쿨다운 · ${sec(it.left)} 뒤 전송`,
     sent: "보냄", resolving: `해결 확인 중 · ${sec(it.left)}`,
@@ -706,17 +758,36 @@ function notifyBody(n) {
         <span class="qopt qline" style="gap:6px"><input type="time" data-q="start" value="${esc(q.start || "00:00")}"> ~ <input type="time" data-q="end" value="${esc(q.end || "08:00")}"></span>
         ${Date.now() - qSavedAt < 3000 ? '<span class="saved">✓ 저장됨</span>' : ""}</div>
       <div class="qline qopt"><span class="lb">요일</span><span class="days">${dayBtns}</span></div>
+      <div class="qline qopt"><span class="lb">시간대</span><input type="text" data-q="tz" placeholder="비우면 서버 시간대 (예: Asia/Seoul)" value="${esc(q.tz || "")}" style="max-width:260px"></div>
       <div class="qline qopt"><span class="lb">주말</span>${tg('data-q="weekend_all_day"', q.weekend_all_day, "토·일은 하루 종일")}</div>
       <div class="sub" style="margin-top:0">🔴빨강은 바로 보내고, 🟡노랑은 모았다가 조용한 시간이 끝나면 요약으로 보내</div>
       ${q.now ? `<div class="sub" style="margin-top:0;color:var(--accent)">🌙 지금 조용한 시간 · ${sec(q.left || 0)} 남음 · 모아 둔 것 ${q.held}건</div>` : ""}
     </div></div>`;
-  const mute = n.mute.length ? `<div class="sub">음소거: ${n.mute.map((m) => `<span class="nt-id">${esc(m)}</span>`).join(" ")}</div>` : "";
+  const numIn = (key, val, mul = 1) => `<input type="number" min="0" step="1" data-ns="${key}" data-mul="${mul}" value="${esc(String(Math.round(val / mul * 10) / 10))}">`;
+  const rulesRow = `<div class="row"><div class="k">알림 규칙</div><div class="qform ${n.enabled ? "" : "off"}">
+      <div class="qline">${tg('data-ns-tg="enabled"', n.enabled, n.enabled ? "알림 켜짐" : "알림 꺼짐")}
+        ${Date.now() - nSavedAt < 3000 ? '<span class="saved">✓ 저장됨</span>' : ""}</div>
+      <div class="qline qopt"><span class="lb">🔴 빨강</span>${numIn("bad_seconds", R.bad_seconds, 60)} 분 넘게 계속되면 보냄 <span class="empty">(0 = 바로)</span></div>
+      <div class="qline qopt"><span class="lb">🟡 노랑</span>${numIn("warn_seconds", R.warn_seconds, 60)} 분 넘게 계속되면 보냄</div>
+      <div class="qline qopt"><span class="lb">쿨다운</span>같은 문제는 ${numIn("cooldown_minutes", R.cooldown_minutes)} 분 안에 다시 안 보냄</div>
+      <div class="qline qopt"><span class="lb">해결 확인</span>${numIn("resolve_seconds", R.resolve_seconds)} 초 동안 안 보이면 해결로 봄</div>
+      <div class="qline qopt"><span class="lb">✅ 해결</span>${tg('data-ns-tg="send_resolved"', R.send_resolved, "해결됐을 때도 알림")}</div>
+      <div class="qline qopt"><span class="lb">링크</span><input type="text" data-ns="link" placeholder="https://… (알림 끝에 붙일 대시보드 주소, 비워도 돼)" value="${esc(n.link || "")}"></div>
+    </div></div>`;
+  const muteRow = `<div class="row"><div class="k">음소거</div><div class="qform">
+      <div class="qline">${n.mute.length ? n.mute.map((m) => `<span class="chip"><span class="nt-id">${esc(m)}</span><button type="button" class="mute-x" data-mute-del="${esc(m)}" title="음소거 해제">✕</button></span>`).join("") : '<span class="empty">없음</span>'}</div>
+      <div class="qline"><input type="text" data-ns-mute placeholder="알림 끌 이름표 (예: mcp:mypc, svc:*)"> <button type="button" class="btn mini" data-mute-add>추가</button></div>
+      <div class="sub" style="margin-top:0">이름표는 아래 "지금 문제" 줄 오른쪽에 나와. 화면 경고는 그대로고 알림만 꺼져. 끝에 *를 붙이면 그걸로 시작하는 것 전부</div>
+    </div></div>`;
   return `<div class="rows">
-    <div class="row"><div class="k">받을 곳</div><div><div class="nt-top"><div class="chips">${ch(n.channels.mattermost, "Mattermost")}${ch(n.channels.telegram, "Telegram")}</div>
-      <button class="btn" data-ntest ${anyCh ? "" : "disabled title='secrets.yaml 에 웹훅 주소를 먼저 넣어 줘'"}>테스트 알림 보내기</button></div>
-      ${anyCh ? "" : '<div class="sub">~/bc250-dash/secrets.yaml 에 웹훅 주소를 넣으면 켜져 (재시작 필요 없음)</div>'}</div></div>
+    <div class="row"><div class="k">받을 곳</div><div>
+      ${n.channels.length ? `<div class="chlist">${n.channels.map(chRow).join("")}</div>` : '<div class="sub" style="margin-top:0">아직 없어. 아래 버튼으로 Mattermost · Slack · Discord · Telegram · ntfy · 일반 웹훅 중에서 골라 추가해 줘</div>'}
+      <div class="nt-top" style="margin-top:8px"><button type="button" class="btn" data-chadd>+ 받을 곳 추가</button>
+        <button class="btn ghost" data-ntest ${anyCh ? "" : "disabled title='받을 곳을 먼저 추가해 줘'"}>전체 테스트 알림</button></div></div></div>
+    ${rulesRow}
     ${quietRow}
-    <div class="row"><div class="k">지금 문제</div><div>${items || '<span class="empty">없음</span>'}${mute}</div></div>
+    ${muteRow}
+    <div class="row"><div class="k">지금 문제</div><div>${items || '<span class="empty">없음</span>'}</div></div>
     <div class="row"><div class="k">최근 전송</div><div class="nt-log">${log || '<span class="empty" style="grid-column:1/-1">아직 보낸 알림 없음</span>'}</div></div>
   </div>`;
 }
@@ -724,8 +795,9 @@ function notifyHead(n) {
   if (!n) return "";
   const R = n.rules, m = (x) => x >= 60 ? `${Math.round(x / 60)}분` : `${x}초`;
   const q = n.quiet || {};
+  if (n.enabled && !(n.channels || []).some((c) => c.enabled && c.ok)) return "받을 곳이 없어서 안 보내는 중 · 아래에서 받을 곳을 추가해 줘";
   return n.enabled ? `빨강 ${m(R.bad_seconds)} · 노랑 ${m(R.warn_seconds)} 넘게 계속되면 보냄 · 같은 문제 ${R.cooldown_minutes}분 쿨다운 · 인지한 건 안 보냄${q.on ? ` · 🌙 ${q.start}~${q.end}` : ""}`
-    : "꺼짐 (config.yaml → notify.enabled)";
+    : "꺼짐 · 아래 알림 규칙에서 켤 수 있어";
 }
 
 // ── 조용한 시간 저장 ──
@@ -741,12 +813,91 @@ async function saveQuiet(patch) {
   qBusy = false;
   setTimeout(load, 500);
 }
-document.addEventListener("focusin", (e) => { if (e.target.matches("input[data-q]")) qBusy = true; });
-document.addEventListener("focusout", (e) => { if (e.target.matches("input[data-q]")) setTimeout(() => { qBusy = false; }, 300); });
+// ── 받을 곳 추가/수정 ──
+const CH_HELP = {
+  mattermost: "Mattermost → 통합 → 수신 웹훅 → 추가 → 채널 고르고 저장 → 나온 주소를 붙여넣어.",
+  slack: "Slack 앱 설정 → Incoming Webhooks 켜기 → Add New Webhook → 채널 고르고 나온 주소를 붙여넣어.",
+  discord: "디스코드 채널 설정 → 연동 → 웹후크 → 새 웹후크 → 'URL 복사' 한 주소를 붙여넣어.",
+  telegram: "@BotFather 에서 /newbot 으로 봇을 만들어 토큰을 받고, 봇에게 아무 말이나 건 뒤 https://api.telegram.org/bot<토큰>/getUpdates 에서 \"chat\":{\"id\": 숫자} 를 확인해.",
+  ntfy: "폰에 ntfy 앱을 깔고 토픽 이름을 하나 정해서 구독해. 자기 서버가 아니면 서버 주소는 비워 둬 (아무나 볼 수 있으니 길고 어려운 토픽 이름 추천).",
+  webhook: "주소로 {\"text\": \"알림 내용\", \"title\": \"서버 이름\"} 을 POST(JSON) 로 보내 줘.",
+};
+let chEdit = null;   // 수정 중인 받을 곳 (null 이면 새로 추가)
+function chRenderFields() {
+  const types = (S.notify && S.notify.channel_types) || {};
+  const t = $("ch-type").value, spec = (types[t] || {fields: []}).fields;
+  $("ch-fields").innerHTML = spec.map((f) => {
+    const cur = chEdit && chEdit.type === t ? chEdit.values[f.key] : null;
+    const val = cur && !f.secret ? cur.value : "";
+    const ph = f.secret && cur && cur.set ? `저장됨 ${cur.hint} (비우면 그대로)` : (f.ph || "");
+    return `<label>${esc(f.label)}${f.required ? " *" : ""}<input type="text" data-chf="${f.key}" value="${esc(val)}" placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"></label>`;
+  }).join("");
+  $("ch-help").textContent = CH_HELP[t] || "";
+}
+function openChannel(c) {
+  chEdit = c || null;
+  const types = (S.notify && S.notify.channel_types) || {};
+  $("ch-type").innerHTML = Object.entries(types).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join("");
+  $("ch-type").value = c ? c.type : Object.keys(types)[0];
+  $("ch-type").disabled = !!c;
+  $("ch-title").textContent = c ? "받을 곳 수정" : "받을 곳 추가";
+  $("ch-name").value = c ? c.name : "";
+  $("ch-del").hidden = !c;
+  $("ch-err").hidden = true;
+  chRenderFields();
+  $("chModal").hidden = false;
+}
+$("ch-type").addEventListener("change", () => { if (!$("ch-name").value) $("ch-name").placeholder = ""; chRenderFields(); });
+$("ch-cancel").addEventListener("click", () => { $("chModal").hidden = true; });
+$("chModal").addEventListener("click", (e) => { if (e.target.id === "chModal") $("chModal").hidden = true; });
+async function chPost(body) {
+  const r = await fetch("api/notify/channel", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+$("ch-ok").addEventListener("click", async () => {
+  const b = $("ch-ok"); b.disabled = true;
+  const conf = {}; document.querySelectorAll("#ch-fields [data-chf]").forEach((i) => { conf[i.dataset.chf] = i.value.trim(); });
+  try {
+    await chPost({action: "save", id: chEdit ? chEdit.id : "", type: $("ch-type").value, name: $("ch-name").value.trim(), conf,
+                  enabled: chEdit ? chEdit.enabled : true});
+    $("chModal").hidden = true; setTimeout(load, 400);
+  } catch (err) { $("ch-err").textContent = err.message; $("ch-err").hidden = false; }
+  b.disabled = false;
+});
+$("ch-del").addEventListener("click", async () => {
+  if (!chEdit || !confirm(`'${chEdit.name}' 받을 곳을 지울까?`)) return;
+  try { await chPost({action: "delete", id: chEdit.id}); $("chModal").hidden = true; setTimeout(load, 400); }
+  catch (err) { $("ch-err").textContent = err.message; $("ch-err").hidden = false; }
+});
+
+// ── 알림 규칙 저장 (켜기·대기 시간·쿨다운·해결 알림·링크·음소거) ──
+let nSavedAt = 0;
+async function saveNotify(patch) {
+  try {
+    const r = await fetch("api/notify/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(patch)});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.status);
+    nSavedAt = Date.now();
+  } catch (err) { alert("저장 실패: " + err.message); }
+  qBusy = false;
+  setTimeout(load, 400);
+}
+const NI = "input[data-q],input[data-ns],input[data-ns-mute]";
+document.addEventListener("focusin", (e) => { if (e.target.matches(NI)) qBusy = true; });
+document.addEventListener("focusout", (e) => { if (e.target.matches(NI)) setTimeout(() => { qBusy = false; }, 300); });
 document.addEventListener("change", (e) => {
   const t = e.target;
-  if (t.matches("input[data-q]") && t.value) saveQuiet({[t.dataset.q]: t.value});
+  if (t.matches("input[data-q]") && (t.value || t.dataset.q === "tz")) saveQuiet({[t.dataset.q]: t.value});
+  else if (t.matches("input[data-ns]") && (t.value !== "" || t.dataset.ns === "link"))
+    saveNotify({[t.dataset.ns]: t.dataset.ns === "link" ? t.value : +t.value * +(t.dataset.mul || 1)});
 });
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches("input[data-ns-mute]")) { e.preventDefault(); addMute(e.target); } });
+function addMute(inp) {
+  const v = inp.value.trim(); if (!v) return;
+  saveNotify({mute: [...((S && S.notify && S.notify.mute) || []), v]});
+}
 
 // ── 실패한 서비스 줄 (PC·폰 같이 씀) ──
 const md = (t) => new Date(t * 1000).toLocaleString("ko-KR", {timeZone: TZ, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false});
@@ -754,6 +905,10 @@ const md = (t) => new Date(t * 1000).toLocaleString("ko-KR", {timeZone: TZ, mont
 const tg = (attrs, on, label, cls = "") => `<button type="button" class="tg ${cls}" role="switch" aria-checked="${on ? "true" : "false"}" ${attrs}>${label ? `<span>${label}</span>` : ""}<i></i></button>`;
 // 서비스 줄 / 포트 줄 인지 토글 (문제 있을 때나 이미 인지했을 때만)
 const svcAck = (s) => (s.state === "warn" || s.state === "bad") ? tg(`data-sack="${esc(s.name)}" data-on="${s.acked ? 0 : 1}"`, !!s.acked, "인지", "sm") : "";
+const agentBtn = (a) => a ? `<button type="button" class="btn mini" data-agent='${esc(JSON.stringify(a))}' title="Hermes Agent 서비스로 보여. Agent 탭에 바로 연결">🤖 Agent 등록</button>` : "";
+const portName = (u) => `<b>${esc(u.label || u.proc || "?")}</b> <span class="empty">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}</span>`;
+const hideBtn = (s) => s.scope === "remote" ? "" : `<button type="button" class="btn mini ghost" data-hide="${esc(s.name)}" title="서비스 목록에서 치워서 '목록에 없는 서비스' 칸으로 보내 (상태 감시·알림에서도 빠져)">목록외 +</button>`;
+const moveBtn = (u) => u.exposure === "internal" ? `<button type="button" class="btn mini" data-pmove="${u.port}" title="안전한 내부 포트라 목록에 없는 서비스 칸으로 치워 둬">목록외 +</button>` : "";
 const portAck = (u) => u.exposure === "lan" ? tg(`data-pack="${u.port}" data-on="${u.acked ? 0 : 1}"`, !!u.acked, "인지", "sm") : "";
 // 서비스 "관리" 버튼 (systemd 서비스만 — manual/remote는 systemctl로 제어 못 함)
 const scBtn = (s) => (s.scope === "system" || s.scope === "user") ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" title="start/stop/restart/enable/disable">관리</button>` : "";
@@ -767,7 +922,7 @@ const mdet = (k, head, body) => `<details class="mlist" style="padding:8px 14px"
 // 서비스 정렬: 포트 있는 것 먼저(번호 오름차순), 포트 없는 건 아래로 (원래 순서 유지)
 const svcSort = (list) => [...list].sort((a, b) => (a.port ? 0 : 1) - (b.port ? 0 : 1) || ((a.port && b.port) ? a.port - b.port : 0));
 // [목록에 추가] 버튼 / 🆕 줄
-const addBtn = (sg, label = "목록에 추가") => sg ? `<button type="button" class="btn mini" data-add="${esc(JSON.stringify(sg))}" title="서비스 표에 올리기">${label}</button>` : "";
+const addBtn = (sg, label = "목록+") => sg ? `<button type="button" class="btn mini" data-add="${esc(JSON.stringify(sg))}" title="서비스 표에 올리기">${label}</button>` : "";
 function newRows(list) {
   return list.map((it) => {
     const nm = it.kind === "svc" ? it.unit.replace(/\.service$/, "") : `포트 ${it.port}`;
@@ -815,7 +970,8 @@ async function postJSON(url, body) {
   return j;
 }
 function failedRows(list) {
-  return list.map((f) => {
+  const ordered = [...list].sort((a, b) => (a.acked ? 1 : 0) - (b.acked ? 1 : 0));   // 인지한 건 맨 아래로
+  return ordered.map((f) => {
     const when = f.failed_at ? `${md(f.failed_at)} 실패` : "실패";
     const sub = f.acked ? `${when} · ${f.acked_at ? md(f.acked_at) + "에 " : ""}인지함` : `${when}${f.desc ? " · " + f.desc : ""}`;
     return `<div class="fl ${f.acked ? "acked" : ""}">
@@ -828,6 +984,45 @@ function failedRows(list) {
 document.addEventListener("click", async (e) => {
   const ad = e.target.closest("[data-add]");
   if (ad) { openAdd(JSON.parse(ad.dataset.add)); return; }
+  const pig = e.target.closest("[data-pignore]");
+  if (pig) {
+    const on = !pig.dataset.off, key = pig.dataset.pignore;
+    if (on && !confirm(`'${key}' 연결을 숨길까?\n(이 서버에서 안 쓰는 연결이면 숨기면 돼. 화면·경고·알림에서 빠지고, 'Agent' 탭의 '숨긴 연결'에서 되돌릴 수 있어)`)) return;
+    pig.disabled = true;
+    try { await postJSON("api/agent/ignore", {key, on}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
+  const tgb = e.target.closest("[data-tgbot]");
+  if (tgb) {
+    const id = tgb.dataset.tgbot;
+    const v = prompt("이 봇의 텔레그램 아이디를 적어 줘 (@ 뒤의 이름, 예: my_bot)\n아이디는 텔레그램에서 봇 프로필의 '@...' 이거야.", "");
+    if (v === null || !v.trim()) return;
+    try { await postJSON("api/agent/bot", {id, telegram: v.trim()}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
+  const hd = e.target.closest("[data-hide]");
+  if (hd) {
+    const on = !hd.dataset.off;
+    if (on && !confirm(`'${hd.dataset.hide}' 을(를) 서비스 목록에서 치울까?\n(서비스 자체는 안 건드려. 상태 감시·알림에서는 빠지고, '목록에 없는 서비스' 칸에서 [목록+] 로 되돌릴 수 있어)`)) return;
+    hd.disabled = true;
+    try { await postJSON("api/services/hide", {name: hd.dataset.hide, on}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
+  const pm = e.target.closest("[data-pmove]");
+  if (pm) {
+    pm.disabled = true;
+    try { await postJSON("api/ports/move", {port: +pm.dataset.pmove, on: !pm.dataset.off}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
+  const ag = e.target.closest("[data-agent]");
+  if (ag) {
+    const a = JSON.parse(ag.dataset.agent);
+    if (!confirm(`'${a.unit.replace(/\.service$/, "")}' 은(는) Hermes Agent 서비스로 보여.\nAgent 탭에 바로 연결할까?`)) return;
+    ag.disabled = true;
+    try { await postJSON("api/agent/register", a); setTimeout(() => { load(); document.querySelector('nav button[data-tab="hermes"]')?.click(); }, 800); }
+    catch (err) { alert(err.message); ag.disabled = false; }
+    return;
+  }
   const sk = e.target.closest("[data-skip]");
   if (sk) { sk.disabled = true; try { await postJSON("api/services/skip", {key: sk.dataset.skip}); } catch (err) { alert(err.message); } setTimeout(load, 600); return; }
   const rm = e.target.closest("[data-rmsvc]");
@@ -838,6 +1033,28 @@ document.addEventListener("click", async (e) => {
   }
   const go = e.target.closest("[data-goto]");
   if (go) { document.querySelector(`nav button[data-tab="${go.dataset.goto}"]`)?.click(); return; }
+  const cadd = e.target.closest("[data-chadd]");
+  if (cadd) { openChannel(null); return; }
+  const ced = e.target.closest("[data-chedit]");
+  if (ced) { openChannel(S.notify.channels.find((c) => c.id === ced.dataset.chedit)); return; }
+  const ctg = e.target.closest("[data-chtg]");
+  if (ctg) {
+    const c = S.notify.channels.find((x) => x.id === ctg.dataset.chtg), on = ctg.getAttribute("aria-checked") !== "true";
+    ctg.setAttribute("aria-checked", on);
+    try { await chPost({action: "save", id: c.id, type: c.type, name: c.name, conf: {}, enabled: on}); } catch (err) { alert(err.message); }
+    setTimeout(load, 300); return;
+  }
+  const cts = e.target.closest("[data-chtest]");
+  if (cts) {
+    cts.disabled = true; cts.textContent = "보내는 중…";
+    try {
+      const r = await fetch("api/notify/test", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: cts.dataset.chtest})});
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok && !j.results) throw new Error(j.error || r.status);
+      alert(Object.entries(j.results || {}).map(([k, v]) => `${k}: ${v === "ok" ? "성공 ✓" : v}`).join("\n"));
+    } catch (err) { alert("테스트 실패: " + err.message); }
+    setTimeout(load, 300); return;
+  }
   const nt = e.target.closest("[data-ntest]");
   if (nt) {
     nt.disabled = true; nt.textContent = "보내는 중…";
@@ -851,6 +1068,16 @@ document.addEventListener("click", async (e) => {
     setTimeout(load, 300);
     return;
   }
+  const ntg = e.target.closest("[data-ns-tg]");
+  if (ntg) {
+    const on = ntg.getAttribute("aria-checked") !== "true";
+    ntg.setAttribute("aria-checked", on); saveNotify({[ntg.dataset.nsTg]: on});
+    return;
+  }
+  const mdel = e.target.closest("[data-mute-del]");
+  if (mdel) { saveNotify({mute: ((S && S.notify && S.notify.mute) || []).filter((m) => m !== mdel.dataset.muteDel)}); return; }
+  const madd = e.target.closest("[data-mute-add]");
+  if (madd) { addMute(madd.closest(".qline").querySelector("input[data-ns-mute]")); return; }
   const qb = e.target.closest("[data-q]");
   if (qb && qb.tagName === "BUTTON") {
     const q = (S && S.notify && S.notify.quiet) || {};
@@ -914,13 +1141,13 @@ function renderMobile() {
     : `<div class="malert ok">✓ 모든 상태 정상</div>`;
   // 개요: 값 + 미니 그래프 한 줄
   const rows = [
-    {key: "gpu_pct", lb: "GPU", v: f0(h.gpu_pct), u: "%", lv: "ok"},
+    {key: "gpu_pct", lb: "GPU", v: f0(h.gpu_pct), u: "%", lv: "ok", skip: h.gpu_pct == null},
     {key: "cpu_pct", lb: "CPU", v: f0(h.cpu_pct), u: "%", lv: "ok"},
-    {key: "apu_temp", lb: "APU 온도", v: f0(h.apu_temp), u: "°C", lv: lvl(h.apu_temp, T.apu_temp_c)},
+    {key: "apu_temp", lb: "APU 온도", v: f0(h.apu_temp), u: "°C", lv: lvl(h.apu_temp, T.apu_temp_c), skip: h.apu_temp == null},
     {key: "mem_pct", lb: "메모리", v: f0(h.mem_pct), u: "%", lv: (S.metric_acks || {}).mem_pct ? "acked" : lvl(h.mem_pct, T.mem_pct)},
     {key: "swap_pct", lb: "스왑", v: f0(h.swap_pct), u: "%", lv: (S.metric_acks || {}).swap_pct ? "acked" : lvl(h.swap_pct, T.swap_pct)},
-    {key: "apu_power", lb: "전력", v: f0(h.apu_power), u: "W", lv: "ok"},
-  ];
+    {key: "apu_power", lb: "전력", v: f0(h.apu_power), u: "W", lv: "ok", skip: h.apu_power == null},
+  ].filter((r) => !r.skip);
   $("m-rows").innerHTML = rows.map((r) => `
     <div class="mr ${r.lv}" data-k="${r.key}"><span class="lb">${r.lb}</span><span class="vl num">${r.v}<small>${r.u}</small></span>${spark(r.key, null, r.lv)}</div>
     <div class="mx ${mOpen.has(r.key) ? "open" : ""}"><div class="plot" id="mpl-${r.key}"></div></div>`).join("") + `
@@ -932,15 +1159,20 @@ function renderMobile() {
   mOpen.forEach((k) => { const c = CHARTS.find((x) => x.key === k); const el = $("mpl-" + k); if (c && el) line(el, c); });
   $("m-facts").innerHTML = [
     ["메모리", `${f1(h.mem_used)} / ${f1(h.mem_total)} GB`], ["스왑", `${f1(h.swap_used)} / ${f1(h.swap_total)} GB`],
-    ["GPU 클럭", `${f0(h.gpu_mhz)} MHz`], ["GPU 온도", `${f1(h.gpu_temp)}°C`],
-    ["GTT", h.gtt_used != null ? `${f1(h.gtt_used)} / ${f1(h.gtt_total)} GB` : "—"], ["펌프 팬", `${f0(h.pump_rpm)} RPM`],
-  ].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+    h.gpu_mhz != null && ["GPU 클럭", `${f0(h.gpu_mhz)} MHz`], h.gpu_temp != null && ["GPU 온도", `${f1(h.gpu_temp)}°C`],
+    h.gtt_used != null && ["GTT", `${f1(h.gtt_used)} / ${f1(h.gtt_total)} GB`], h.pump_rpm != null && ["펌프 팬", `${f0(h.pump_rpm)} RPM`],
+  ].filter(Boolean).map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
 
   // 봇
   const hz = S.hermes || {};
   const colors = ["#5c9dff", "#a77bff", "#ff8a5c", "#3ecf7e", "#f0b23e", "#ff6b9a"];
   $("m-bots").innerHTML = (hz.bots || []).map((b, i) => {
-    const pl = b.platforms.map((p) => linkChip(appLink(b, p.name), `<span class="dot ${p.level}"></span>${esc(p.name)}`, `${p.name} 열기`)).join("");
+    const pl = b.platforms.map((p) => {
+      const inner = `<span class="dot ${p.level}"></span>${esc(p.name)}`, href = appLink(b, p.name);
+      return !href && p.name === "Telegram"
+        ? `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 봇의 텔레그램 아이디를 알려 줘">${inner}<span class="go">＋아이디</span></button>`
+        : linkChip(href, inner, `${p.name} 열기`);
+    }).map((c, i) => c + (b.platforms[i].level !== "ok" ? ignoreBtn(b.id, b.platforms[i].name) : "")).join("");
     return `<div class="mi"><div class="av" style="--c:${colors[i % colors.length]}">${esc((b.name || "?")[0])}</div>
       <div class="mid"><div class="nm">${esc(b.name)} <small>${esc(b.role || "")}</small></div>
         <div class="sb">${esc(b.model || "모델 기록 없음")}</div>${pl ? `<div class="chips" style="margin-top:6px">${pl}</div>` : ""}</div>
@@ -965,7 +1197,8 @@ function renderMobile() {
     const stLine = [
       `<small>${s.scope === "manual" ? "수동" : s.scope === "remote" ? "원격" : s.scope === "user" ? "user" : "system"}</small>`,
       s.optional ? "<small>선택</small>" : "",
-      s.extra ? `<small>화면 추가</small> <button type="button" class="btn mini ghost" data-rmsvc="${esc(s.name)}">빼기</button>` : "",
+      s.extra ? "<small>화면 추가</small>" : "",
+      hideBtn(s),
       s.restarts ? `<small>재시작 ${s.restarts}회</small>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -978,15 +1211,18 @@ function renderMobile() {
         ${s.since ? `<br>${dur(now - s.since)}` : ""}</div></div>`;
   };
   const unk = (S.unknown_ports || []);
+  const fl = S.failed || [], failedLive = fl.some((f) => !f.acked);
+  const failedSec = fl.length ? mdet("failed", failedLive ? `⚠ 실패한 서비스 ${fl.length}개 · 알고 있으면 인지 켜기` : `실패한 서비스 ${fl.length}개 · 모두 인지함`, failedRows(fl)) : "";
   if (!qBusy) $("m-svc").innerHTML = `${(S.new_items || []).length ? `<div class="mlist-h">🆕 새로 생긴 것 · 목록에 올리거나 넘겨 줘</div><div class="mlist newc" style="padding:2px 14px">${newRows(S.new_items)}</div>` : ""}
     <div class="mlist-h">🔒 내부 전용 · 🏢 사내망 · 🌐 인터넷</div>
     <div class="mlist">${svcSort(S.services).map(svcRow).join("")}</div>
-    ${(S.failed || []).length ? mdet("failed", `${(S.failed || []).some((f) => !f.acked) ? "⚠ " : ""}실패한 서비스 ${(S.failed || []).length}개 · 알고 있으면 인지 켜기`, failedRows(S.failed)) : ""}
+    ${failedLive ? failedSec : ""}
     ${mdet("notify", `🔔 알림 · ${esc(notifyHead(S.notify))}`, notifyBody(S.notify))}
     ${unk.length ? mdet("unknown", `${unk.some((u) => u.exposure === "lan" && !u.acked) ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개`, unk.map((u) =>
-      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.proc || "?")}${portAck(u)}</div><div class="sb">pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${addBtn(u.suggest)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
+      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.label || u.proc || "?")}${portAck(u)}</div><div class="sb">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${agentBtn(u.agent)} ${addBtn(u.suggest)} ${moveBtn(u)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
     ${(S.other_services || []).length ? mdet("others", `목록에 없는 서비스 ${(S.other_services || []).length}개 · + 로 목록에 올려 줘`, `<div class="others">${(S.other_services || []).map((o) =>
-      `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}</span>`).join("")}</div>`) : ""}`;
+      `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${o.restore ? `<button type="button" class="btn mini" data-hide="${esc(o.restore)}" data-off="1" title="다시 서비스 목록에 올리기">목록+</button>` : addBtn(o.suggest)}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("")}</div>`) : ""}
+    ${failedLive ? "" : failedSec}`;
 
   // 탭 바 숫자
   [["hermes", "cnt-hermes"], ["services", "cnt-services"]].forEach(([t, id]) => {
