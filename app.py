@@ -678,10 +678,12 @@ def read_hermes():
 #  서비스 표 만들기 (config + systemd + 포트)
 # ─────────────────────────────────────────────
 _gone = []      # 서비스 파일이 사라져서 표에서 자동으로 뺀 것들 (매 수집마다 새로 채움)
+_moved_ports = []   # [목록외 +]로 "목록에 없는 포트" 칸으로 치운 포트들
 
 
 def build_services(ports, urlchecks, llama):
     _gone.clear()
+    _moved_ports.clear()
     svcs = all_services()
     sys_units = [s["unit"] for s in svcs if s.get("scope") == "system"]
     usr_units = [s["unit"] for s in svcs if s.get("scope") == "user"]
@@ -770,6 +772,27 @@ def build_services(ports, urlchecks, llama):
         u["suggest"] = suggest_for(own and own["unit"], own and own["scope"] == "user", u["port"], u.get("proc"))
         u["agent"] = ({"unit": own["unit"], "scope": own["scope"]}
                       if own and agent_candidate(own["unit"], u["cmd"]) else None)
+    # 같은 서비스가 연 포트 정리: ① 이미 목록에 있는 서비스가 연 내부 포트는 그 줄에 "+ :포트"로 붙임
+    #                            ② 목록에 없는 서비스가 연 포트들은 한 줄로 묶음 (노출 범위가 같은 것끼리)
+    row_by_unit = {r["unit"]: r for r in rows if r.get("unit")}
+    rest = []
+    for u in unknown:
+        row = row_by_unit.get((u.get("owner") or {}).get("unit"))
+        if row and u["exposure"] == "internal":
+            row.setdefault("sub_ports", []).append(u["port"])
+            continue
+        rest.append(u)
+    grouped, unknown = {}, []
+    for u in rest:
+        own = u.get("owner")
+        key = (own["unit"], u["exposure"]) if own else None
+        if key and key in grouped:
+            grouped[key]["ports"].append(u["port"])
+            continue
+        u["ports"] = [u["port"]]
+        if key:
+            grouped[key] = u
+        unknown.append(u)
     others = other_sys + other_usr
     for o in others:
         o["suggest"] = suggest_for(o["unit"], o.get("user"))
@@ -785,16 +808,15 @@ def build_services(ports, urlchecks, llama):
             continue
         others.append({"unit": h.get("unit"), "label": h["name"], "port": h.get("port"), "user": h.get("scope") == "user",
                        "restore": h["name"], "suggest": None, "agent": None})
-    # [서비스로 보내기]한 내부 전용 포트는 "목록에 없는 포트"에서 빼서 "목록에 없는 서비스"로 옮김
+    # [목록외 +]한 내부 전용 포트는 "새로 감지된 포트"에서 빼서 "목록에 없는 포트" 칸(칩)으로 옮김
     moved = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
     keep = []
     for u in unknown:
         if u["port"] in moved and u["exposure"] == "internal":
-            unit = u["owner"]["unit"] if u.get("owner") else None
-            if unit and any(o.get("unit") == unit for o in others):
-                continue                        # 이미 서비스 칸에 있으니 포트 줄만 없앰
-            others.append({"unit": unit, "label": u["label"], "port": u["port"], "user": bool(u.get("owner") and u["owner"]["scope"] == "user"),
-                           "moved": True, "suggest": u["suggest"], "agent": u["agent"]})
+            own = u.get("owner")
+            _moved_ports.append({"port": u["port"], "ports": u.get("ports") or [u["port"]], "label": u["label"],
+                                 "unit": own["unit"] if own else None, "user": bool(own and own["scope"] == "user"),
+                                 "suggest": u["suggest"], "agent": u["agent"]})
         else:
             keep.append(u)
     unknown = keep
@@ -1052,7 +1074,7 @@ def collect_once():
         "agent_enabled": bool((CFG.get("hermes") or {}).get("unit")),
         "agent_cfg": _agent_cfg(),
         "overall": overall, "badges": badges, "hw": hw, "llama": llama,
-        "services": services, "gone_services": list(_gone), "unknown_ports": unknown, "other_services": others,
+        "services": services, "gone_services": list(_gone), "moved_ports": list(_moved_ports), "unknown_ports": unknown, "other_services": others,
         "failed": failed, "new_items": new_items, "acked": acked, "acked_count": len(acked), "metric_acks": macks, "hermes": hz,
         "notify": NOTIFY.status(now), "thresholds": TH, "title": TITLE,
     }
@@ -1265,7 +1287,7 @@ def api_ports_move():
     if on:
         cur = next((u for u in (STATE["snapshot"] or {}).get("unknown_ports") or [] if u["port"] == port), None)
         if not cur or cur.get("exposure") != "internal":
-            return jsonify({"ok": False, "error": "내부 전용 포트만 서비스 칸으로 보낼 수 있어 (사내망 포트는 인지로 처리해 줘)"}), 400
+            return jsonify({"ok": False, "error": "내부 전용 포트만 '목록에 없는 포트' 칸으로 보낼 수 있어 (사내망 포트는 인지로 처리해 줘)"}), 400
     with EXTRA_LOCK:
         cur_list = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
         (cur_list.add if on else cur_list.discard)(port)
