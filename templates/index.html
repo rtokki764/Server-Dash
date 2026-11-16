@@ -437,6 +437,8 @@ const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";   // 보�
 const OPEN = {{ open_cfg | tojson }};
 const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 // 봇 대화방을 앱으로 바로 여는 주소 (없으면 null → 그냥 칩)
+const mmSetup = (b, inner) => `<button type="button" class="chip" data-mmbot="${esc(b.id)}" title="눌러서 Mattermost 서버·팀·이 봇의 사용자 이름을 알려 주면, 다음부터 이 칩으로 대화방이 열려">${inner}<span class="go">＋설정</span></button>`;
+const mmClear = (b, plat) => plat === "Mattermost" && b.mm_user ? `<button type="button" class="btn mini ghost" data-mmclear="${esc(b.id)}" data-cur="${esc(b.mm_user)}" title="저장한 Mattermost 사용자 이름(@${esc(b.mm_user)})을 지워서 다시 입력할 수 있게 해">끊기</button>` : "";
 const tgEdit = (b, plat) => plat === "Telegram" && b.tg_user ? `<button type="button" class="btn mini ghost" data-tgclear="${esc(b.id)}" data-cur="${esc(b.tg_user)}" title="저장한 텔레그램 봇 아이디(@${esc(b.tg_user)})를 지워서 다시 입력할 수 있게 해">끊기</button>` : "";
 function appLink(bot, plat) {
   if (plat === "Mattermost" && bot.mm_user && OPEN.team) {
@@ -642,7 +644,8 @@ function renderHermes() {
       const href = appLink(b, p.name);
       if (!href && p.name === "Telegram")      // 봇 아이디를 모르면 눌러서 알려 주게
         return `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 이 봇의 텔레그램 아이디를 알려 주면, 다음부터 이 칩으로 대화방이 열려">${inner}<span class="go">＋아이디</span></button>` + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
-      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + tgEdit(b, p.name) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
+      if (!href && p.name === "Mattermost") return mmSetup(b, inner) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
+      return linkChip(href, inner, `${p.name} 앱에서 ${b.name} 대화방 열기`) + tgEdit(b, p.name) + mmClear(b, p.name) + (lv !== "ok" ? ignoreBtn(b.id, p.name) : "");
     }).join("") || '<span class="empty">연결된 메신저 없음</span>';
     return `<div class="card bot ${b.level}">
       <div class="top"><span class="dot ${b.level}"></span><span class="nm">${esc(b.name)}</span><span class="rl">${esc(b.role || "")}</span>${b.parked ? '<span class="tag" style="color:var(--bad)">parked</span>' : ""}</div>
@@ -1021,6 +1024,35 @@ document.addEventListener("click", async (e) => {
     try { await postJSON("api/agent/ignore", {key, on}); } catch (err) { alert(err.message); }
     setTimeout(load, 500); return;
   }
+  const mmc = e.target.closest("[data-mmclear]");
+  if (mmc) {
+    if (!confirm(`저장한 Mattermost 사용자 이름 @${mmc.dataset.cur} 를 지울까?\n(Mattermost 연결 자체는 안 건드려. 지우면 칩의 ＋설정으로 다시 쓸 수 있어)`)) return;
+    mmc.disabled = true;
+    try { await postJSON("api/agent/bot", {id: mmc.dataset.mmclear, mattermost: ""}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
+  const mmb = e.target.closest("[data-mmbot]");
+  if (mmb) {
+    const id = mmb.dataset.mmbot, bot = ((S.hermes || {}).bots || []).find((x) => x.id === id) || {};
+    try {
+      if (!OPEN.server) {
+        const v = prompt("Mattermost 서버 주소를 적어 줘 (예: mm.example.com)\n브라우저로 Mattermost 열 때 주소창에 보이는 서버 이름이야. https:// 는 빼도 돼.", "");
+        if (v === null || !v.trim()) return;
+        OPEN.server = (await postJSON("api/agent/open", {server: v.trim()})).open.server;
+      }
+      if (!OPEN.team) {
+        const v = prompt("Mattermost 팀 이름을 적어 줘 (예: myteam)\n주소가 mm.example.com/myteam/channels/... 일 때 가운데 myteam 이야.", "");
+        if (v === null || !v.trim()) return;
+        OPEN.team = (await postJSON("api/agent/open", {team: v.trim()})).open.team;
+      }
+      if (!bot.mm_user) {
+        const v = prompt(`'${bot.name || id}' 봇의 Mattermost 사용자 이름을 적어 줘 (예: thia)\nMattermost 에서 이 봇 프로필의 '@' 뒤 이름이야. @는 빼도 되고 붙여도 돼.`, "");
+        if (v === null || !v.trim()) return;
+        await postJSON("api/agent/bot", {id, mattermost: v.trim()});
+      }
+    } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
   const tgc = e.target.closest("[data-tgclear]");
   if (tgc) {
     if (!confirm(`저장한 텔레그램 아이디 @${tgc.dataset.cur} 를 지울까?\n(텔레그램 연결 자체는 안 건드려. 지우면 칩의 ＋아이디로 다시 쓸 수 있어)`)) return;
@@ -1215,7 +1247,8 @@ function renderMobile() {
       const inner = `<span class="dot ${p.level}"></span>${esc(p.name)}`, href = appLink(b, p.name);
       return !href && p.name === "Telegram"
         ? `<button type="button" class="chip" data-tgbot="${esc(b.id)}" title="눌러서 봇의 텔레그램 아이디를 알려 줘">${inner}<span class="go">＋아이디</span></button>`
-        : linkChip(href, inner, `${p.name} 열기`) + tgEdit(b, p.name);
+        : (!href && p.name === "Mattermost") ? mmSetup(b, inner)
+        : linkChip(href, inner, `${p.name} 열기`) + tgEdit(b, p.name) + mmClear(b, p.name);
     }).map((c, i) => c + (b.platforms[i].level !== "ok" ? ignoreBtn(b.id, b.platforms[i].name) : "")).join("");
     return `<div class="mi"><div class="av" style="--c:${colors[i % colors.length]}">${esc((b.name || "?")[0])}</div>
       <div class="mid"><div class="nm">${esc(b.name)} <small>${esc(b.role || "")}</small></div>
