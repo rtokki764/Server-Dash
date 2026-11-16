@@ -8,6 +8,7 @@ agent_extra.json
 config.yaml
 notify_settings.json
 notify_state.json
+ports_moved.json
 secrets.yaml
 seen.json
 services_extra.json

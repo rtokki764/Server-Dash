@@ -22,6 +22,14 @@ control:
 
 notify:
   enabled: false         # 웹훅(Mattermost/Telegram)을 쓰려면 true + secrets.yaml 작성
+  # 아래 값은 전부 대시보드 화면 🔔 알림 칸에서 바로 바꿀 수 있어 (화면에서 바꾼 값이 이 파일보다 우선).
+  # bad_seconds: 60          # 빨강이 이만큼(초) 넘게 계속되면 보냄
+  # warn_seconds: 600        # 노랑이 이만큼(초) 넘게 계속되면 보냄
+  # cooldown_minutes: 30     # 같은 문제는 이 시간 안에 다시 안 보냄
+  # send_resolved: true      # 해결 알림도 보낼지
+  # link: https://내-대시보드-주소   # 알림 끝에 붙일 주소
+  # quiet_hours: { start: "00:00", end: "08:00" }   # 조용한 시간 (tz 를 안 적으면 서버 시간대)
+  # mute: []                 # 알림 끌 이름표
 
 # 경고 기준 (생략하면 기본값: 메모리 85/95%, 스왑 70/90%, 디스크 80/90%, 온도 80/90°C)
 # thresholds:

@@ -74,6 +74,8 @@ EXTRA_FILE = BASE / "services_extra.json"
 # 처음 본 서비스·포트 기록 ("🆕 새로 생긴 것" 판단용)
 SEEN_FILE = BASE / "seen.json"
 EXTRA_LOCK = threading.Lock()
+# 화면에서 [서비스로 보내기]한 내부 전용 포트 (목록에 없는 포트 → 목록에 없는 서비스로 옮김)
+MOVED_FILE = BASE / "ports_moved.json"
 # 화면에서 [Agent 등록]한 Hermes 서비스 (config.yaml 에 hermes 가 없을 때만 채워 줌)
 AGENT_FILE = BASE / "agent_extra.json"
 
@@ -728,6 +730,19 @@ def build_services(ports, urlchecks, llama):
         o["suggest"] = suggest_for(o["unit"], o.get("user"))
         o["agent"] = ({"unit": o["unit"], "scope": "user" if o.get("user") else "system"}
                       if agent_candidate(o["unit"], None) else None)
+    # [서비스로 보내기]한 내부 전용 포트는 "목록에 없는 포트"에서 빼서 "목록에 없는 서비스"로 옮김
+    moved = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
+    keep = []
+    for u in unknown:
+        if u["port"] in moved and u["exposure"] == "internal":
+            unit = u["owner"]["unit"] if u.get("owner") else None
+            if unit and any(o.get("unit") == unit for o in others):
+                continue                        # 이미 서비스 칸에 있으니 포트 줄만 없앰
+            others.append({"unit": unit, "label": u["label"], "port": u["port"], "user": bool(u.get("owner") and u["owner"]["scope"] == "user"),
+                           "moved": True, "suggest": u["suggest"], "agent": u["agent"]})
+        else:
+            keep.append(u)
+    unknown = keep
     return rows, unknown, others, failed
 
 
@@ -736,7 +751,7 @@ def detect_new(unknown, others, now):
     돌려주는 것: (새로 생긴 것 목록, 처리한(추가/넘기기) 이름표 모음)"""
     with EXTRA_LOCK:
         seen = _read_json(SEEN_FILE, {})
-        units = {o["unit"]: o for o in others}
+        units = {o["unit"]: o for o in others if o.get("unit")}   # 직접 띄운 프로그램(unit 없음)은 제외
         lan = {u["port"]: u for u in unknown if u["exposure"] == "lan"}
         if not seen.get("init"):
             seen = {"init": now, "units": {k: now for k in units},
@@ -1176,6 +1191,30 @@ def api_agent_register():
     return jsonify({"ok": True})
 
 
+@app.post("/api/ports/move")
+def api_ports_move():
+    """내부 전용 포트를 '목록에 없는 서비스'로 보내기 / 다시 포트 목록으로 되돌리기"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    b = request.get_json(silent=True) or {}
+    try:
+        port = int(b.get("port"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "포트 번호가 이상해"}), 400
+    on = bool(b.get("on", True))
+    if on:
+        cur = next((u for u in (STATE["snapshot"] or {}).get("unknown_ports") or [] if u["port"] == port), None)
+        if not cur or cur.get("exposure") != "internal":
+            return jsonify({"ok": False, "error": "내부 전용 포트만 서비스 칸으로 보낼 수 있어 (사내망 포트는 인지로 처리해 줘)"}), 400
+    with EXTRA_LOCK:
+        cur_list = {int(x) for x in _read_json(MOVED_FILE, []) if str(x).isdigit()}
+        (cur_list.add if on else cur_list.discard)(port)
+        _write_json(MOVED_FILE, sorted(cur_list))
+    _slow["ports_at"] = 0
+    WAKE.set()
+    return jsonify({"ok": True})
+
+
 @app.post("/api/services/remove")
 def api_services_remove():
     """화면에서 추가한 서비스만 뺄 수 있어 (config.yaml 에 적은 건 X)"""
@@ -1214,6 +1253,19 @@ def api_notify_test():
     entry = NOTIFY.test()
     WAKE.set()
     return jsonify({"ok": entry["ok"], "results": entry["results"]})
+
+
+@app.post("/api/notify/settings")
+def api_notify_settings():
+    """알림 규칙(켜기/대기 시간/쿨다운/해결 알림/링크/음소거)을 화면에서 바꿀 때. 바로 적용돼 (재시작 X)"""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "json only"}), 415
+    try:
+        r = NOTIFY.set_settings(request.get_json(silent=True) or {})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    WAKE.set()
+    return jsonify({"ok": True, "settings": r})
 
 
 @app.post("/api/notify/quiet")

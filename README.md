@@ -121,7 +121,8 @@ services:
 - 센서: AMD APU/GPU(BC250 등)는 `sensors:` 를 안 적어도 **자동으로 찾아** (APU·GPU 온도, 전력 등). 칩이 다르면 `sensors:` 로 덮어써
 - **Agent 탭**은 Hermes Agent 를 돌리는 서버에서만 나와. `config.yaml` 에 `hermes:` (unit 포함)를 적어야 켜져 — `config.example.yaml` 맨 아래 예시 참고
 - 화면의 **목록에 없는 포트**에는 서비스 이름(systemd 서비스면 그 이름, 아니면 프로그램 이름)이 나와. Hermes 서비스로 보이면 **[🤖 Agent 등록]** 버튼이 떠서, 누르면 설정 파일 수정 없이 바로 Agent 탭에 연결돼 (`agent_extra.json` 에 저장)
-- 알림(`notify:`) 같은 건 선택이야. 없으면 그 부분만 빠져
+- 내부 전용 포트는 **[서비스로 보내기]** 로 "목록에 없는 서비스" 칸으로 치울 수 있어 (칩의 ↩ 로 되돌리기, `ports_moved.json` 에 저장)
+- 알림: 대시보드 🔔 칸에서 **알림 켜기 · 빨강/노랑 대기 시간 · 쿨다운 · 해결 알림 · 링크 · 조용한 시간(시간대 포함) · 음소거**를 전부 바로 바꿀 수 있어 (`notify_settings.json` 에 저장, 재시작 필요 없음). `config.yaml` 의 `notify:` 는 처음 기본값일 뿐이야
 - 경고 기준은 `thresholds:` 로 바꿀 수 있어 (기본: 메모리 85/95%, 디스크 80/90% 등)
 - `dashboard.title` 을 비워 두면 hostname 이 제목이야
 

@@ -90,6 +90,11 @@
   .qform input[type=time] { font: inherit; font-size: 14px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
                             background: var(--panel); color: var(--fg); color-scheme: light dark; }
   .qform.off .qopt { opacity: .45; }
+  .qform input[type=number], .qform input[type=text] { font: inherit; font-size: 14px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
+                            background: var(--panel); color: var(--fg); }
+  .qform input[type=number] { width: 70px; }
+  .qform input[type=text] { min-width: 200px; flex: 1; max-width: 360px; }
+  .mute-x { appearance: none; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 0 0 4px; }
   .saved { color: var(--ok); font-size: 12px; font-weight: 600; }
   .svc .tg { margin-left: auto; }
   .newc { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
@@ -660,7 +665,7 @@ function renderServices() {
   $("unknown-body").innerHTML = `<table class="tbl"><tbody>${unk.map((u) => `<tr><td class="port">${u.port}</td>
       <td><span class="exp ${u.exposure}">${icon[u.exposure]} ${word[u.exposure]}</span></td>
       <td>${portName(u)}${u.acked ? ' <span class="ackt">인지됨</span>' : ""}</td>
-      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${agentBtn(u.agent)}${addBtn(u.suggest)}${portAck(u)}</span></td></tr>`).join("")}</tbody></table>`;
+      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${agentBtn(u.agent)}${addBtn(u.suggest)}${moveBtn(u)}${portAck(u)}</span></td></tr>`).join("")}</tbody></table>`;
   $("new-wrap").innerHTML = (S.new_items || []).length ? `<h2>🆕 새로 생긴 것 <span style="color:var(--muted);font-weight:500;font-size:13px">설치 뒤 처음 보는 서비스·사내망 포트 · 목록에 올리거나 넘겨 줘</span></h2>
     <div class="card newc">${newRows(S.new_items)}</div>` : "";
 
@@ -673,7 +678,7 @@ function renderServices() {
   if (!qBusy) $("notify-body").innerHTML = notifyBody(S.notify);
   // 목록에 없는 서비스 (접힌 카드 · 이름 옆 + 버튼으로 바로 목록에 추가)
   $("others-sum").textContent = `목록에 없는 서비스 ${others.length}개 · 보고 싶은 건 + 로 올려 줘`;
-  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${agentBtn(o.agent)}</span>`).join("");
+  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("");
   const newPorts = new Set((S.new_items || []).map((it) => it.port).filter(Boolean));
   const n = S.services.filter((s) => (s.state === "warn" || s.state === "bad") && !s.acked).length + unk.filter((u) => u.exposure === "lan" && !u.acked && !newPorts.has(u.port)).length + live.length + (S.new_items || []).length;
   const bad = S.services.some((s) => s.state === "bad" && !s.acked) || live.length;
@@ -706,17 +711,35 @@ function notifyBody(n) {
         <span class="qopt qline" style="gap:6px"><input type="time" data-q="start" value="${esc(q.start || "00:00")}"> ~ <input type="time" data-q="end" value="${esc(q.end || "08:00")}"></span>
         ${Date.now() - qSavedAt < 3000 ? '<span class="saved">✓ 저장됨</span>' : ""}</div>
       <div class="qline qopt"><span class="lb">요일</span><span class="days">${dayBtns}</span></div>
+      <div class="qline qopt"><span class="lb">시간대</span><input type="text" data-q="tz" placeholder="비우면 서버 시간대 (예: Asia/Seoul)" value="${esc(q.tz || "")}" style="max-width:260px"></div>
       <div class="qline qopt"><span class="lb">주말</span>${tg('data-q="weekend_all_day"', q.weekend_all_day, "토·일은 하루 종일")}</div>
       <div class="sub" style="margin-top:0">🔴빨강은 바로 보내고, 🟡노랑은 모았다가 조용한 시간이 끝나면 요약으로 보내</div>
       ${q.now ? `<div class="sub" style="margin-top:0;color:var(--accent)">🌙 지금 조용한 시간 · ${sec(q.left || 0)} 남음 · 모아 둔 것 ${q.held}건</div>` : ""}
     </div></div>`;
-  const mute = n.mute.length ? `<div class="sub">음소거: ${n.mute.map((m) => `<span class="nt-id">${esc(m)}</span>`).join(" ")}</div>` : "";
+  const numIn = (key, val, mul = 1) => `<input type="number" min="0" step="1" data-ns="${key}" data-mul="${mul}" value="${esc(String(Math.round(val / mul * 10) / 10))}">`;
+  const rulesRow = `<div class="row"><div class="k">알림 규칙</div><div class="qform ${n.enabled ? "" : "off"}">
+      <div class="qline">${tg('data-ns-tg="enabled"', n.enabled, n.enabled ? "알림 켜짐" : "알림 꺼짐")}
+        ${Date.now() - nSavedAt < 3000 ? '<span class="saved">✓ 저장됨</span>' : ""}</div>
+      <div class="qline qopt"><span class="lb">🔴 빨강</span>${numIn("bad_seconds", R.bad_seconds, 60)} 분 넘게 계속되면 보냄 <span class="empty">(0 = 바로)</span></div>
+      <div class="qline qopt"><span class="lb">🟡 노랑</span>${numIn("warn_seconds", R.warn_seconds, 60)} 분 넘게 계속되면 보냄</div>
+      <div class="qline qopt"><span class="lb">쿨다운</span>같은 문제는 ${numIn("cooldown_minutes", R.cooldown_minutes)} 분 안에 다시 안 보냄</div>
+      <div class="qline qopt"><span class="lb">해결 확인</span>${numIn("resolve_seconds", R.resolve_seconds)} 초 동안 안 보이면 해결로 봄</div>
+      <div class="qline qopt"><span class="lb">✅ 해결</span>${tg('data-ns-tg="send_resolved"', R.send_resolved, "해결됐을 때도 알림")}</div>
+      <div class="qline qopt"><span class="lb">링크</span><input type="text" data-ns="link" placeholder="https://… (알림 끝에 붙일 대시보드 주소, 비워도 돼)" value="${esc(n.link || "")}"></div>
+    </div></div>`;
+  const muteRow = `<div class="row"><div class="k">음소거</div><div class="qform">
+      <div class="qline">${n.mute.length ? n.mute.map((m) => `<span class="chip"><span class="nt-id">${esc(m)}</span><button type="button" class="mute-x" data-mute-del="${esc(m)}" title="음소거 해제">✕</button></span>`).join("") : '<span class="empty">없음</span>'}</div>
+      <div class="qline"><input type="text" data-ns-mute placeholder="알림 끌 이름표 (예: mcp:mypc, svc:*)"> <button type="button" class="btn mini" data-mute-add>추가</button></div>
+      <div class="sub" style="margin-top:0">이름표는 아래 "지금 문제" 줄 오른쪽에 나와. 화면 경고는 그대로고 알림만 꺼져. 끝에 *를 붙이면 그걸로 시작하는 것 전부</div>
+    </div></div>`;
   return `<div class="rows">
     <div class="row"><div class="k">받을 곳</div><div><div class="nt-top"><div class="chips">${ch(n.channels.mattermost, "Mattermost")}${ch(n.channels.telegram, "Telegram")}</div>
       <button class="btn" data-ntest ${anyCh ? "" : "disabled title='secrets.yaml 에 웹훅 주소를 먼저 넣어 줘'"}>테스트 알림 보내기</button></div>
-      ${anyCh ? "" : '<div class="sub">~/bc250-dash/secrets.yaml 에 웹훅 주소를 넣으면 켜져 (재시작 필요 없음)</div>'}</div></div>
+      ${anyCh ? "" : '<div class="sub">설치 폴더의 secrets.yaml 에 웹훅 주소를 넣으면 켜져 (재시작 필요 없음)</div>'}</div></div>
+    ${rulesRow}
     ${quietRow}
-    <div class="row"><div class="k">지금 문제</div><div>${items || '<span class="empty">없음</span>'}${mute}</div></div>
+    ${muteRow}
+    <div class="row"><div class="k">지금 문제</div><div>${items || '<span class="empty">없음</span>'}</div></div>
     <div class="row"><div class="k">최근 전송</div><div class="nt-log">${log || '<span class="empty" style="grid-column:1/-1">아직 보낸 알림 없음</span>'}</div></div>
   </div>`;
 }
@@ -725,7 +748,7 @@ function notifyHead(n) {
   const R = n.rules, m = (x) => x >= 60 ? `${Math.round(x / 60)}분` : `${x}초`;
   const q = n.quiet || {};
   return n.enabled ? `빨강 ${m(R.bad_seconds)} · 노랑 ${m(R.warn_seconds)} 넘게 계속되면 보냄 · 같은 문제 ${R.cooldown_minutes}분 쿨다운 · 인지한 건 안 보냄${q.on ? ` · 🌙 ${q.start}~${q.end}` : ""}`
-    : "꺼짐 (config.yaml → notify.enabled)";
+    : "꺼짐 · 아래 알림 규칙에서 켤 수 있어";
 }
 
 // ── 조용한 시간 저장 ──
@@ -741,12 +764,32 @@ async function saveQuiet(patch) {
   qBusy = false;
   setTimeout(load, 500);
 }
-document.addEventListener("focusin", (e) => { if (e.target.matches("input[data-q]")) qBusy = true; });
-document.addEventListener("focusout", (e) => { if (e.target.matches("input[data-q]")) setTimeout(() => { qBusy = false; }, 300); });
+// ── 알림 규칙 저장 (켜기·대기 시간·쿨다운·해결 알림·링크·음소거) ──
+let nSavedAt = 0;
+async function saveNotify(patch) {
+  try {
+    const r = await fetch("api/notify/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(patch)});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.status);
+    nSavedAt = Date.now();
+  } catch (err) { alert("저장 실패: " + err.message); }
+  qBusy = false;
+  setTimeout(load, 400);
+}
+const NI = "input[data-q],input[data-ns],input[data-ns-mute]";
+document.addEventListener("focusin", (e) => { if (e.target.matches(NI)) qBusy = true; });
+document.addEventListener("focusout", (e) => { if (e.target.matches(NI)) setTimeout(() => { qBusy = false; }, 300); });
 document.addEventListener("change", (e) => {
   const t = e.target;
-  if (t.matches("input[data-q]") && t.value) saveQuiet({[t.dataset.q]: t.value});
+  if (t.matches("input[data-q]") && (t.value || t.dataset.q === "tz")) saveQuiet({[t.dataset.q]: t.value});
+  else if (t.matches("input[data-ns]") && (t.value !== "" || t.dataset.ns === "link"))
+    saveNotify({[t.dataset.ns]: t.dataset.ns === "link" ? t.value : +t.value * +(t.dataset.mul || 1)});
 });
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches("input[data-ns-mute]")) { e.preventDefault(); addMute(e.target); } });
+function addMute(inp) {
+  const v = inp.value.trim(); if (!v) return;
+  saveNotify({mute: [...((S && S.notify && S.notify.mute) || []), v]});
+}
 
 // ── 실패한 서비스 줄 (PC·폰 같이 씀) ──
 const md = (t) => new Date(t * 1000).toLocaleString("ko-KR", {timeZone: TZ, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false});
@@ -756,6 +799,7 @@ const tg = (attrs, on, label, cls = "") => `<button type="button" class="tg ${cl
 const svcAck = (s) => (s.state === "warn" || s.state === "bad") ? tg(`data-sack="${esc(s.name)}" data-on="${s.acked ? 0 : 1}"`, !!s.acked, "인지", "sm") : "";
 const agentBtn = (a) => a ? `<button type="button" class="btn mini" data-agent='${esc(JSON.stringify(a))}' title="Hermes Agent 서비스로 보여. Agent 탭에 바로 연결">🤖 Agent 등록</button>` : "";
 const portName = (u) => `<b>${esc(u.label || u.proc || "?")}</b> <span class="empty">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}</span>`;
+const moveBtn = (u) => u.exposure === "internal" ? `<button type="button" class="btn mini" data-pmove="${u.port}" title="안전한 내부 포트라 목록에 없는 서비스 칸으로 치워 둬">서비스로 보내기</button>` : "";
 const portAck = (u) => u.exposure === "lan" ? tg(`data-pack="${u.port}" data-on="${u.acked ? 0 : 1}"`, !!u.acked, "인지", "sm") : "";
 // 서비스 "관리" 버튼 (systemd 서비스만 — manual/remote는 systemctl로 제어 못 함)
 const scBtn = (s) => (s.scope === "system" || s.scope === "user") ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" title="start/stop/restart/enable/disable">관리</button>` : "";
@@ -830,6 +874,12 @@ function failedRows(list) {
 document.addEventListener("click", async (e) => {
   const ad = e.target.closest("[data-add]");
   if (ad) { openAdd(JSON.parse(ad.dataset.add)); return; }
+  const pm = e.target.closest("[data-pmove]");
+  if (pm) {
+    pm.disabled = true;
+    try { await postJSON("api/ports/move", {port: +pm.dataset.pmove, on: !pm.dataset.off}); } catch (err) { alert(err.message); }
+    setTimeout(load, 500); return;
+  }
   const ag = e.target.closest("[data-agent]");
   if (ag) {
     const a = JSON.parse(ag.dataset.agent);
@@ -862,6 +912,16 @@ document.addEventListener("click", async (e) => {
     setTimeout(load, 300);
     return;
   }
+  const ntg = e.target.closest("[data-ns-tg]");
+  if (ntg) {
+    const on = ntg.getAttribute("aria-checked") !== "true";
+    ntg.setAttribute("aria-checked", on); saveNotify({[ntg.dataset.nsTg]: on});
+    return;
+  }
+  const mdel = e.target.closest("[data-mute-del]");
+  if (mdel) { saveNotify({mute: ((S && S.notify && S.notify.mute) || []).filter((m) => m !== mdel.dataset.muteDel)}); return; }
+  const madd = e.target.closest("[data-mute-add]");
+  if (madd) { addMute(madd.closest(".qline").querySelector("input[data-ns-mute]")); return; }
   const qb = e.target.closest("[data-q]");
   if (qb && qb.tagName === "BUTTON") {
     const q = (S && S.notify && S.notify.quiet) || {};
@@ -995,9 +1055,9 @@ function renderMobile() {
     ${(S.failed || []).length ? mdet("failed", `${(S.failed || []).some((f) => !f.acked) ? "⚠ " : ""}실패한 서비스 ${(S.failed || []).length}개 · 알고 있으면 인지 켜기`, failedRows(S.failed)) : ""}
     ${mdet("notify", `🔔 알림 · ${esc(notifyHead(S.notify))}`, notifyBody(S.notify))}
     ${unk.length ? mdet("unknown", `${unk.some((u) => u.exposure === "lan" && !u.acked) ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개`, unk.map((u) =>
-      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.label || u.proc || "?")}${portAck(u)}</div><div class="sb">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${agentBtn(u.agent)} ${addBtn(u.suggest)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
+      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.label || u.proc || "?")}${portAck(u)}</div><div class="sb">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${agentBtn(u.agent)} ${addBtn(u.suggest)} ${moveBtn(u)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
     ${(S.other_services || []).length ? mdet("others", `목록에 없는 서비스 ${(S.other_services || []).length}개 · + 로 목록에 올려 줘`, `<div class="others">${(S.other_services || []).map((o) =>
-      `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${o.agent ? agentBtn(o.agent) : ""}</span>`).join("")}</div>`) : ""}`;
+      `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("")}</div>`) : ""}`;
 
   // 탭 바 숫자
   [["hermes", "cnt-hermes"], ["services", "cnt-services"]].forEach(([t, id]) => {

@@ -73,8 +73,19 @@ class Notifier:
         threading.Thread(target=self._worker, daemon=True).start()
 
     # ── 설정값 ──
+    # 우선순위: 화면에서 저장한 값(notify_settings.json) > config.yaml 의 notify > 기본값
+    EDITABLE = ("enabled", "bad_seconds", "warn_seconds", "resolve_seconds", "cooldown_minutes",
+                "send_resolved", "link", "mute")
+
+    def _saved(self):
+        try:
+            return json.loads(self.settings_file.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
+
     def _c(self, key, default):
-        v = self.cfg.get(key)
+        sv = self._saved().get("notify") or {}
+        v = sv[key] if key in sv else self.cfg.get(key)
         return default if v is None else v
 
     @property
@@ -93,7 +104,7 @@ class Notifier:
         q = self.cfg.get("quiet_hours") or {}
         s = {"enabled": bool(q.get("start") and q.get("end")), "start": str(q.get("start") or "00:00"),
              "end": str(q.get("end") or "08:00"), "days": [0, 1, 2, 3, 4, 5, 6],
-             "weekend_all_day": False, "tz": q.get("tz", "Asia/Seoul")}
+             "weekend_all_day": False, "tz": q.get("tz") or ""}   # tz 가 비면 서버 시간대
         try:
             saved = json.loads(self.settings_file.read_text(encoding="utf-8")).get("quiet") or {}
             s.update({k: v for k, v in saved.items() if k in s})
@@ -122,10 +133,16 @@ class Notifier:
         for k in ("enabled", "weekend_all_day"):
             if k in data:
                 cur[k] = bool(data[k])
-        saved = {k: cur[k] for k in ("enabled", "start", "end", "days", "weekend_all_day")}
-        tmp = self.settings_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"quiet": saved}, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self.settings_file)
+        if "tz" in data:
+            tz = str(data["tz"]).strip()
+            if tz and ZoneInfo:
+                try:
+                    ZoneInfo(tz)
+                except Exception:
+                    raise ValueError(f"시간대 이름이 이상해: {tz} (예: Asia/Seoul, 비우면 서버 시간대)")
+            cur["tz"] = tz
+        saved = {k: cur[k] for k in ("enabled", "start", "end", "days", "weekend_all_day", "tz")}
+        self._write_saved("quiet", saved)
         names = "월화수목금토일"
         dtext = "매일" if len(cur["days"]) == 7 else ("요일 없음" if not cur["days"] else "".join(names[d] for d in cur["days"]))
         text = (f"🌙 조용한 시간 {'켬' if cur['enabled'] else '끔'} · {cur['start']}~{cur['end']} · {dtext}"
@@ -136,8 +153,51 @@ class Notifier:
             self._save()
         return cur
 
+    def _write_saved(self, section, value):
+        """notify_settings.json 의 한 부분만 바꿔 저장 (다른 부분은 그대로)"""
+        data = self._saved()
+        data[section] = value
+        tmp = self.settings_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self.settings_file)
+
+    def set_settings(self, data):
+        """화면에서 바꾼 알림 규칙 검사하고 저장. 틀리면 ValueError. 바로 적용돼 (재시작 X)"""
+        cur = {k: self._c(k, None) for k in self.EDITABLE}
+        sv = dict(self._saved().get("notify") or {})
+        ranges = {"bad_seconds": (0, 86400), "warn_seconds": (0, 86400), "resolve_seconds": (10, 3600),
+                  "cooldown_minutes": (0, 10080)}
+        names = {"bad_seconds": "빨강 대기", "warn_seconds": "노랑 대기", "resolve_seconds": "해결 확인",
+                 "cooldown_minutes": "쿨다운"}
+        for k, (lo, hi) in ranges.items():
+            if k in data:
+                try:
+                    v = int(float(data[k]))
+                except (TypeError, ValueError):
+                    raise ValueError(f"{names[k]} 값이 숫자가 아니야")
+                if not lo <= v <= hi:
+                    raise ValueError(f"{names[k]} 값은 {lo}~{hi} 사이여야 해")
+                sv[k] = v
+        for k in ("enabled", "send_resolved"):
+            if k in data:
+                sv[k] = bool(data[k])
+        if "link" in data:
+            link = str(data["link"]).strip()
+            if link and not link.startswith(("http://", "https://")):
+                raise ValueError("대시보드 주소는 http:// 또는 https:// 로 시작해야 해")
+            sv["link"] = link[:200]
+        if "mute" in data:
+            items = [str(m).strip() for m in (data["mute"] or []) if str(m).strip()]
+            sv["mute"] = sorted(set(items))[:200]
+        self._write_saved("notify", sv)
+        with self.lock:
+            self.state["log"] = (self.state["log"] + [{"t": time.time(), "kind": "setting", "text": "🔔 알림 규칙을 바꿨어",
+                                                        "results": {"설정": "ok"}, "ok": True}])[-10:]
+            self._save()
+        return {k: self._c(k, None) for k in self.EDITABLE}
+
     def _local(self, now, tz):
-        if ZoneInfo:
+        if ZoneInfo and tz:
             try:
                 return datetime.fromtimestamp(now, ZoneInfo(tz))
             except Exception:
@@ -172,7 +232,7 @@ class Notifier:
         return True, None
 
     def _muted(self, bid):
-        return any(bid == m or (m.endswith("*") and bid.startswith(m[:-1])) for m in (self.cfg.get("mute") or []))
+        return any(bid == m or (m.endswith("*") and bid.startswith(m[:-1])) for m in (self._c("mute", None) or []))
 
     # ── 저장 ──
     def _load(self):
@@ -293,8 +353,8 @@ class Notifier:
             self.q.put(self._format(alerts, resolved, now))
 
     def _digest(self, held, act, now):
-        q = self.quiet() or {"start": "?", "end": "?", "tz": "Asia/Seoul"}
-        hm = lambda t: (datetime.fromtimestamp(t, ZoneInfo(q["tz"])) if ZoneInfo else datetime.fromtimestamp(t)).strftime("%H:%M")
+        q = self.quiet() or {"start": "?", "end": "?", "tz": ""}
+        hm = lambda t: (datetime.fromtimestamp(t, ZoneInfo(q["tz"])) if ZoneInfo and q["tz"] else datetime.fromtimestamp(t)).strftime("%H:%M")
         lines = [f"🌙 {self.title} 조용한 시간 요약 · 노랑 {len(held)}건"]
         for bid, h in sorted(held.items(), key=lambda x: x[1].get("since", 0)):
             a = act.get(bid)
@@ -303,7 +363,7 @@ class Notifier:
             else:
                 end = h.get("end") or now
                 lines.append(f"✅ {h.get('text', bid)} — {hm(h['since'])}~{hm(end)} (해결됨)")
-        link = self.cfg.get("link")
+        link = self._c("link", None)
         if link:
             lines.append(link)
         return {"text": "\n".join(lines), "kind": "digest", "count": len(held)}
@@ -322,7 +382,7 @@ class Notifier:
             lines.append(f"✅ {self.title} 해결 {len(resolved)}건")
             for r in resolved:
                 lines.append(f"✅ {r['text']} — {_dur(r['dur'])} 만에 해결")
-        link = self.cfg.get("link")
+        link = self._c("link", None)
         if link:
             lines.append(link)
         return {"text": "\n".join(lines), "kind": "alert" if alerts else "resolved",
@@ -410,4 +470,4 @@ class Notifier:
         return {"quiet": {**qs, "on": qs["enabled"], "now": quiet, "left": round(qleft) if qleft else None, "held": held_n},
                 "enabled": self.enabled, "channels": {"mattermost": "mattermost" in ch, "telegram": "telegram" in ch},
                 "rules": R, "items": sorted(items, key=lambda x: x["since"]), "log": log[::-1],
-                "mute": self.cfg.get("mute") or []}
+                "mute": self._c("mute", None) or [], "link": self._c("link", None) or ""}
