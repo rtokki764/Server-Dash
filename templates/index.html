@@ -433,9 +433,9 @@
 <div id="mmModal" class="modal" hidden>
   <div class="mbox" role="dialog" aria-modal="true">
     <h3 id="mm-title">Mattermost 대화방 열기 설정</h3>
-    <label id="mm-server-wrap">서버 주소<input type="text" id="mm-server" placeholder="mm.example.com" maxlength="120" autocomplete="off"></label>
-    <label>팀 이름<input type="text" id="mm-team" placeholder="myteam" maxlength="64" autocomplete="off"></label>
-    <label>봇 이름 (사용자 이름)<input type="text" id="mm-user" placeholder="thia" maxlength="64" autocomplete="off"></label>
+    <label id="mm-server-wrap">① 서버 주소 (예: mm.example.com)<input type="text" id="mm-server" placeholder="mm.example.com" maxlength="120" autocomplete="off"></label>
+    <label>② 팀 이름 (예: myteam)<input type="text" id="mm-team" placeholder="myteam" maxlength="64" autocomplete="off"></label>
+    <label>③ 봇 이름 (@ 뒤 이름, 예: thia)<input type="text" id="mm-user" placeholder="thia" maxlength="64" autocomplete="off"></label>
     <div class="info">브라우저로 Mattermost 를 열면 주소가 <b>서버/팀이름/channels/…</b> 로 보여. 서버·팀 이름은 거기서 복사하고, 봇 이름은 봇 프로필의 <b>@ 뒤 이름</b>이야. @는 붙여도 돼. 서버·팀은 한 번만 쓰면 모든 봇에 적용돼.<br><b>서버 주소는 Mattermost 데스크톱 앱의 서버 목록에 등록된 주소와 똑같이</b> 써야 해 (포트·https 까지 같게). 다르면 앱이 새 서버로 보고 404 가 날 수 있어.</div>
     <div class="err" id="mm-err" hidden></div>
     <div class="btns"><button type="button" class="btn ghost" id="mm-cancel">취소</button><button type="button" class="btn" id="mm-ok">저장</button></div>
@@ -1026,6 +1026,9 @@ async function saveMM() {
   if (!OPEN.server && !server) return err("서버 주소를 적어 줘");
   if (!team) return err("팀 이름을 적어 줘");
   if (!user) return err("봇 이름을 적어 줘");
+  const srv = server || OPEN.server || "";
+  if (srv && !/[.:]/.test(srv) && srv.toLowerCase() !== "localhost") return err(`'${srv}' 는 서버 주소처럼 안 보여 (점 . 이 없어). 서버 칸에는 mm.example.com 같은 주소를 써. 봇 이름 칸이랑 바뀐 건 아닌지 확인해 줘`);
+  if (srv && srv.replace(/^@/, "").toLowerCase() === user.replace(/^@/, "").toLowerCase()) return err("서버 주소와 봇 이름이 같아. 칸이 바뀐 것 같아 — 다시 확인해 줘");
   $("mm-ok").disabled = true;
   try {
     const body = {};

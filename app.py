@@ -1426,6 +1426,8 @@ def api_agent_open():
         v = _host_norm(b.get("server"))
         if v and not re.fullmatch(r"[A-Za-z0-9.\-]+(:\d{1,5})?(/[A-Za-z0-9._~\-/]*)?", v):
             return jsonify({"ok": False, "error": "서버 주소가 이상해. 예: mm.example.com (https:// 는 빼도 돼)"}), 400
+        if v and "." not in v and ":" not in v and v.lower() != "localhost":
+            return jsonify({"ok": False, "error": f"'{v}' 는 서버 주소처럼 안 보여 (점 . 이 없어). 서버 주소는 mm.example.com 처럼 써야 해. 봇 이름 칸이랑 바뀐 건 아닌지 확인해 줘"}), 400
         upd["server"] = v
     if "team" in b:
         v = str(b.get("team") or "").strip().strip("/").lower()

@@ -74,3 +74,7 @@ remote: []
 #   log_window_hours: 6
 #   bots:
 #     thia:  { name: Thia, role: 비서, mattermost: thia }
+#   # Mattermost 칩으로 폰·PC 앱의 대화방을 바로 열고 싶을 때 (화면의 ＋설정 창에서 적어도 돼. 여기 적으면 이 값이 우선이라 화면에서는 못 고쳐)
+#   open:
+#     server: mm.example.com         # Mattermost 앱에 등록된 서버 주소와 똑같이 (https:// 는 빼). 봇 이름이 아니야!
+#     team: myteam                   # 브라우저 주소의 서버/팀이름/channels/... 에서 팀이름
