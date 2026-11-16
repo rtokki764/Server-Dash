@@ -202,6 +202,8 @@
   .exp.internal { color: var(--muted); }
   .exp.lan { color: var(--fg); }
   .exp.internet { color: var(--fg); font-weight: 550; }
+  [data-subof][hidden] { display: none !important; }
+  .subtog { margin-left: 8px; font-size: 11px; padding: 1px 7px; }
   .subrow td { padding-top: 0; border-top: 0; }
   .subrow .svc { font-size: 13px; color: var(--muted); }
   .el { color: var(--muted); margin: 0 6px 0 22px; font-family: monospace; }
@@ -695,11 +697,11 @@ function renderServices() {
       svcAck(s),
     ].filter(Boolean).join(" ") || '<span class="empty">—</span>';
     return `<tr>
-      <td><div class="svc ${s.acked ? "acked" : ""}"><span class="dot ${s.acked ? "off" : s.state}"></span>${esc(s.name)}</div>${sub ? `<div class="svc-sub">${esc(sub)}</div>` : ""}</td>
+      <td><div class="svc ${s.acked ? "acked" : ""}"><span class="dot ${s.acked ? "off" : s.state}"></span>${esc(s.name)}${(s.sub_ports || []).length ? subBtn("s:" + s.name, s.sub_ports.length) : ""}</div>${sub ? `<div class="svc-sub">${esc(sub)}</div>` : ""}</td>
       <td>${scBtn(s) || '<span class="empty">—</span>'}</td>
       <td>${portCell}</td><td>${exp}</td>
       <td class="r num hide-sm">${s.since ? dur(now - s.since) : '<span class="empty">—</span>'}</td>
-      <td><div class="svc" style="flex-wrap:wrap">${stateCell}</div></td></tr>` + subRows(s.sub_ports, 6);
+      <td><div class="svc" style="flex-wrap:wrap">${stateCell}</div></td></tr>` + subRows(s.sub_ports, 6, s.name, "s:" + s.name);
   }).join("");
 
   const unk = S.unknown_ports || [];
@@ -710,10 +712,10 @@ function renderServices() {
   const inbox = nit.length + unkShow.length;
   $("unknown-sum").textContent = !inbox ? "새로 감지된 포트 및 서비스 0개"
     : `${nit.length || unkLan ? "⚠ " : ""}새로 감지된 포트 및 서비스 ${inbox}개${unkLan || unk.some((u) => u.acked) ? "" : " · 전부 내부 전용이라 안전"}`;
-  $("unknown-body").innerHTML = (nit.length ? `<div class="newc" style="padding:2px 14px">${newRows(nit)}</div>` : "") + (unkShow.length ? `<table class="tbl"><tbody>${unkShow.map((u) => `<tr><td class="port">${u.port}</td>
+  $("unknown-body").innerHTML = (nit.length ? `<div class="newc" style="padding:2px 14px">${newRows(nit)}</div>` : "") + (unkShow.length ? `<table class="tbl"><tbody>${unkShow.map((u) => `<tr><td class="port">${u.port}${(u.ports || []).length > 1 ? subBtn("u:" + u.port, u.ports.length - 1) : ""}</td>
       <td><span class="exp ${u.exposure}">${icon[u.exposure]} ${word[u.exposure]}</span></td>
       <td>${portName(u)}${u.acked ? ' <span class="ackt">인지됨</span>' : ""}</td>
-      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${agentBtn(u.agent)}${addBtn(u.suggest)}${moveBtn(u)}</span></td></tr>` + (u.ports || []).slice(1).map((x) => `<tr class="subrow"><td class="port"><span class="el" style="margin:0 6px 0 0">└</span>${x}</td><td><span class="exp ${u.exposure}">${icon[u.exposure]} ${word[u.exposure]}</span></td><td colspan="2" style="color:var(--muted);font-size:13px">같은 서비스의 포트</td></tr>`).join("")).join("")}</tbody></table>` : "");
+      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${agentBtn(u.agent)}${addBtn(u.suggest)}${moveBtn(u)}</span></td></tr>` + (u.ports || []).slice(1).map((x) => `<tr class="subrow" data-subof="u:${u.port}"${subHid("u:" + u.port)}><td class="port"><span class="el" style="margin:0 6px 0 0">└</span>${x}</td><td><span class="exp ${u.exposure}">${icon[u.exposure]} ${word[u.exposure]}</span></td><td colspan="2" style="color:var(--muted);font-size:13px">${esc(u.label || u.proc || "")}</td></tr>`).join("")).join("")}</tbody></table>` : "");
   { const ud = $("unknown-det"); if (nit.length && !ud.dataset.auto) { ud.open = true; ud.dataset.auto = "1"; } }
 
   const others = S.other_services || [], failed = S.failed || [];
@@ -922,11 +924,14 @@ const agentBtn = (a) => a ? `<button type="button" class="btn mini" data-agent='
 const portName = (u) => `<b>${esc(u.label || u.proc || "?")}</b> <span class="empty">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}</span>`;
 const hideBtn = (s) => s.scope === "remote" ? "" : `<button type="button" class="btn mini ghost" data-hide="${esc(s.name)}" title="서비스 목록에서 치워서 '목록에 없는 서비스' 칸으로 보내 (상태 감시·알림에서도 빠져)">목록외 +</button>`;
 const EXPI = {internal: "🔒 내부 전용", lan: "🏢 사내망"}, EXPE = {internal: "🔒", lan: "🏢"};
-const subRows = (ports, cols) => (ports || []).map((sp) =>
-  `<tr class="subrow"><td><div class="svc"><span class="el">└</span>같은 서비스의 ${sp.exposure === "lan" ? "" : "내부 "}포트</div></td><td></td><td><span class="port">${sp.port}</span></td><td><span class="exp ${sp.exposure}">${EXPI[sp.exposure]}</span></td>${"<td></td>".repeat(Math.max(0, cols - 4))}</tr>`).join("");
-const subMob = (ports, exp) => (ports || []).map((sp) => {
+const openSubs = new Set();          // 펼쳐 둔 서비스 (화면이 새로 그려져도 유지)
+const subBtn = (key, n) => `<button type="button" class="btn mini ghost subtog" data-subtoggle="${esc(key)}" title="같은 서비스가 연 다른 포트 보기">${openSubs.has(key) ? "▾" : "▸"} 포트 +${n}</button>`;
+const subHid = (key) => (openSubs.has(key) ? "" : " hidden");
+const subRows = (ports, cols, name, key) => (ports || []).map((sp) =>
+  `<tr class="subrow" data-subof="${esc(key)}"${subHid(key)}><td><div class="svc"><span class="el">└</span>${esc(name)}</div></td><td></td><td><span class="port">${sp.port}</span></td><td><span class="exp ${sp.exposure}">${EXPI[sp.exposure]}</span></td>${"<td></td>".repeat(Math.max(0, cols - 4))}</tr>`).join("");
+const subMob = (ports, exp, name, key) => (ports || []).map((sp) => {
   const o = typeof sp === "object" ? sp : {port: sp, exposure: exp || "internal"};
-  return `<div class="mi subm"><span class="el" style="margin:0 6px 0 0">└</span><div class="mid"><div class="sb">같은 서비스의 포트</div></div><div class="rt"><span class="port num">${o.port}</span> ${EXPE[o.exposure]}</div></div>`;
+  return `<div class="mi subm" data-subof="${esc(key)}"${subHid(key)}><span class="el" style="margin:0 6px 0 0">└</span><div class="mid"><div class="nm" style="font-weight:500">${esc(name)}</div></div><div class="rt"><span class="port num">${o.port}</span> ${EXPE[o.exposure]}</div></div>`;
 }).join("");
 const mportChip = (o) => `<span class="oth">${o.exposure ? EXPE[o.exposure] + " " : ""}${esc(o.label)} <small>:${portsTxt(o)}</small>${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest)}${agentBtn(o.agent)}<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 새로 감지된 포트로 되돌리기">↩</button></span>`;
 const portsTxt = (u) => (u.ports && u.ports.length > 1 ? u.ports.join(" · ") : u.port);
@@ -1029,6 +1034,14 @@ document.addEventListener("click", async (e) => {
     hd.disabled = true;
     try { await postJSON("api/services/hide", {name: hd.dataset.hide, on}); } catch (err) { alert(err.message); }
     setTimeout(load, 500); return;
+  }
+  const stg = e.target.closest("[data-subtoggle]");
+  if (stg) {
+    const k = stg.dataset.subtoggle, on = !openSubs.has(k);
+    on ? openSubs.add(k) : openSubs.delete(k);
+    document.querySelectorAll("[data-subof]").forEach((el) => { if (el.dataset.subof === k) el.hidden = !on; });
+    document.querySelectorAll("[data-subtoggle]").forEach((b) => { if (b.dataset.subtoggle === k) b.textContent = b.textContent.replace(/^[▸▾]/, on ? "▾" : "▸"); });
+    return;
   }
   const pm = e.target.closest("[data-pmove]");
   if (pm) {
@@ -1226,11 +1239,11 @@ function renderMobile() {
       svcAck(s),
     ].filter(Boolean).join(" ");
     return `<div class="mi"><span class="dot ${s.state === "off" || s.acked ? "off" : s.state}"></span>
-      <div class="mid"><div class="nm">${esc(s.name)}</div>
+      <div class="mid"><div class="nm">${esc(s.name)}${(s.sub_ports || []).length ? subBtn("s:" + s.name, s.sub_ports.length) : ""}</div>
         ${line2 ? `<div class="sb ${cls}">${esc(line2)}</div>` : ""}
         <div class="sb">${stLine}</div></div>
       <div class="rt">${scBtn(s) ? scBtn(s) + "<br>" : ""}${s.port ? `<span class="port num">${s.port}</span> ` : ""}${s.exposure ? icon[s.exposure] : ""}
-        ${s.since ? `<br>${dur(now - s.since)}` : ""}</div></div>` + subMob(s.sub_ports);
+        ${s.since ? `<br>${dur(now - s.since)}` : ""}</div></div>` + subMob(s.sub_ports, null, s.name, "s:" + s.name);
   };
   const unk = (S.unknown_ports || []);
   const nitM = S.new_items || [], nitPortsM = new Set(nitM.map((it) => it.port).filter(Boolean));
@@ -1242,7 +1255,7 @@ function renderMobile() {
     ${failedLive ? failedSec : ""}
     ${mdet("notify", `🔔 알림 · ${esc(notifyHead(S.notify))}`, notifyBody(S.notify))}
     ${mdet("unknown", !inboxM ? "새로 감지된 포트 및 서비스 0개" : `${nitM.length || unk.some((u) => u.exposure === "lan" && !u.acked) ? "⚠ " : ""}새로 감지된 포트 및 서비스 ${inboxM}개`, (nitM.length ? `<div style="padding:2px 14px">${newRows(nitM)}</div>` : "") + unkM.map((u) =>
-      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.label || u.proc || "?")}</div><div class="sb">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${agentBtn(u.agent)} ${addBtn(u.suggest)} ${moveBtn(u)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>` + subMob((u.ports || []).slice(1), u.exposure)).join("") || '<div class="mi"><div class="mid"><div class="sb">비어 있어</div></div></div>')}
+      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.label || u.proc || "?")}${(u.ports || []).length > 1 ? subBtn("u:" + u.port, u.ports.length - 1) : ""}</div><div class="sb">${u.kind === "service" ? "서비스" : "직접 실행"}${u.cmd && u.cmd !== u.label ? " · " + esc(u.cmd) : ""} · pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${agentBtn(u.agent)} ${addBtn(u.suggest)} ${moveBtn(u)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>` + subMob((u.ports || []).slice(1), u.exposure, u.label || u.proc || "", "u:" + u.port)).join("") || '<div class="mi"><div class="mid"><div class="sb">비어 있어</div></div></div>')}
     ${(S.other_services || []).length ? mdet("others", `목록에 없는 서비스 ${(S.other_services || []).length}개`, `<div class="others">${(S.other_services || []).map((o) =>
       `<span class="oth">${esc(o.label || o.unit.replace(/\.service$/, ""))}${o.port ? ` <small>:${o.port}</small>` : ""}${o.user ? " <small>(user)</small>" : ""}${o.restore ? `<button type="button" class="btn mini" data-hide="${esc(o.restore)}" data-off="1" title="다시 서비스 목록에 올리기">목록+</button>` : addBtn(o.suggest)}${agentBtn(o.agent)}${o.moved ? `<button type="button" class="btn mini" data-pmove="${o.port}" data-off="1" title="다시 목록에 없는 포트로 되돌리기">↩</button>` : ""}</span>`).join("")}</div>`) : ""}
     ${mdet("mports", (S.moved_ports || []).length ? `목록에 없는 포트 ${S.moved_ports.length}개` : "목록에 없는 포트 0개", `<div class="others">${(S.moved_ports || []).map(mportChip).join("") || '<span class="empty">비어 있어</span>'}</div>`)}
