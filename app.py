@@ -32,6 +32,10 @@ CFG = yaml.safe_load((BASE / "config.yaml").read_text(encoding="utf-8"))
 DEMO = os.environ.get("BC250_DEMO") == "1"
 
 D = CFG.get("dashboard") or {}
+try:  # 버전은 코드와 함께 오는 VERSION 파일에서 읽음 (config.yaml 이 옛날 거여도 정확하게 표시)
+    APP_VERSION = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION"), encoding="utf-8").read().strip()
+except OSError:
+    APP_VERSION = D.get("version", "")
 # 경고 기준: config에 없으면 무난한 기본값
 _TH_DEFAULT = {
     "apu_temp_c": {"warn": 80, "bad": 90}, "gpu_temp_c": {"warn": 80, "bad": 90},
@@ -960,7 +964,7 @@ def index():
     open_cfg = {"team": op.get("team"), "server": op.get("server"), "server_office": op.get("server_office"),
                 "at_office": bool(op.get("office_ip")) and ip == op.get("office_ip")}
     return render_template("index.html", title=TITLE, refresh=D.get("refresh_seconds", 5), open_cfg=open_cfg,
-                           version=D.get("version", ""), author=D.get("author", ""), updated=D.get("updated", ""))
+                           version=APP_VERSION, author=D.get("author", ""), updated=D.get("updated", ""))
 
 
 @app.get("/manifest.webmanifest")

@@ -8,7 +8,22 @@ CPU·메모리·디스크·온도, 서비스 상태, 열린 포트를 보여주�
 - 폰·PC 둘 다 쓰기 편한 화면, 홈 화면에 앱으로 설치 가능
 - 서버 이름은 hostname 이 자동으로 제목이 돼
 
-## 설치
+## 필요한 것
+
+- **systemd 가 있는 리눅스** (Ubuntu / Debian / Arch / CachyOS 등)
+- `git`, `python3`(+venv), `curl`, `sudo`
+
+처음 한 번만 설치해 두면 돼.
+
+```bash
+# Ubuntu / Debian
+sudo apt install -y git python3 python3-venv curl
+
+# Arch / CachyOS
+sudo pacman -S --needed git python curl sudo
+```
+
+## 설치 (새 서버)
 
 ```bash
 git clone https://github.com/rtokki764/Server-Dash.git
@@ -16,15 +31,79 @@ cd Server-Dash
 bash install.sh
 ```
 
+> fish 쉘이어도 `bash install.sh` 로 실행하면 돼. **명령은 한 줄씩** 입력해 줘 (여러 줄을 한 번에 붙여넣으면 꼬여).
+
 `install.sh` 가 해 주는 일:
-1. 파이썬 가상환경 + 라이브러리 설치
-2. `config.yaml` 이 없으면 `config.example.yaml` 을 복사해서 만듦
-3. 사용자 서비스(`systemctl --user`)로 등록하고 시작 (로그아웃해도 계속 돎)
-4. 열린 포트의 프로그램 이름을 보려고 `ss -tlnpH` **한 명령만** 비밀번호 없이 sudo 허용
+1. 필요한 것(python3, venv, systemd) 확인 — 없으면 뭘 설치해야 하는지 알려 주고 멈춤
+2. 파이썬 가상환경 + 라이브러리 설치
+3. `config.yaml` / `secrets.yaml` 이 **없을 때만** 예시 파일로 만듦 (있으면 안 건드림)
+4. 사용자 서비스(`systemctl --user`)로 등록하고 시작 (로그아웃해도 계속 돎)
+5. 열린 포트의 프로그램 이름을 보려고 `ss -tlnpH` **한 명령만** 비밀번호 없이 sudo 허용
 
-끝나면 http://127.0.0.1:5070 으로 열어 봐.
+끝에 `API 응답 코드: 200` 이 나오면 성공이야. 브라우저에서 http://127.0.0.1:5070 으로 열어 봐.
 
-> 설치 위치는 어디든 괜찮아. 필요한 건 systemd 가 있는 리눅스와 Python 3 뿐이야.
+설치 위치는 어디든 괜찮아 (서비스 파일에 실제 경로가 자동으로 들어가).
+
+### 설치 직후 할 일
+
+```bash
+nano config.yaml                              # services: 에 이 서버에서 볼 서비스 적기
+systemctl --user restart bc250-dash.service   # 고친 뒤 다시 시작
+```
+
+알림(Mattermost / Telegram)을 쓸 거면 `nano secrets.yaml` 에 웹훅 주소를 채우고 마찬가지로 재시작해.
+
+## 업데이트
+
+이미 이 방식(git clone)으로 설치돼 있다면 이 두 줄이면 끝이야.
+
+```bash
+cd Server-Dash          # 설치한 폴더 (BC250 은 ~/bc250-dash)
+git pull
+bash install.sh
+```
+
+- `config.yaml`, `secrets.yaml` 은 git 에 안 올라가서 그대로 유지돼
+- 화면 아래쪽 버전이 바뀌었는지 확인해 (브라우저에서 `Ctrl+F5`)
+- `git pull` 이 "local changes" 라며 막으면 코드를 직접 고친 거야. `git stash` 후 다시 `git pull` 해 줘
+
+## zip 으로 설치했던 서버를 git 으로 갈아타기 (한 번만)
+
+예전에 zip 으로 설치한 서버(예: `~/bc250-dash`)를 git 방식으로 바꾸는 방법이야. 설정은 백업해서 그대로 가져와.
+
+```bash
+cp ~/bc250-dash/config.yaml ~/config-backup.yaml
+cp ~/bc250-dash/secrets.yaml ~/secrets-backup.yaml
+cd ~
+mv bc250-dash bc250-dash-old
+git clone https://github.com/rtokki764/Server-Dash.git bc250-dash
+cp ~/config-backup.yaml ~/bc250-dash/config.yaml
+cp ~/secrets-backup.yaml ~/bc250-dash/secrets.yaml
+cd bc250-dash
+bash install.sh
+```
+
+잘 도는 걸 확인하면 `rm -rf ~/bc250-dash-old` 로 옛 폴더를 지워도 돼.
+이후 업데이트는 위의 **업데이트** 두 줄만 하면 돼.
+
+## 문제가 생기면
+
+| 증상 | 해결 |
+|---|---|
+| `python3-venv` 가 없다고 나옴 | `sudo apt install -y python3-venv` 후 다시 `bash install.sh` |
+| 응답 코드가 200 이 아님 | `journalctl --user -u bc250-dash.service -n 30 --no-pager` 로 에러 확인 |
+| 서비스가 안 보임 | `config.yaml` 의 `services:` 들여쓰기(스페이스 2칸) 확인 |
+| 재부팅하면 꺼짐 | `sudo loginctl enable-linger $USER` |
+| 화면이 안 바뀜 | 브라우저 `Ctrl+F5` (폰은 앱을 닫았다 다시 열기) |
+
+## 삭제
+
+```bash
+systemctl --user disable --now bc250-dash.service bc250-mcp-watchdog.timer
+rm -f ~/.config/systemd/user/bc250-dash.service ~/.config/systemd/user/bc250-mcp-watchdog.*
+sudo rm -f /etc/sudoers.d/bc250-dash
+rm -rf ~/Server-Dash        # 설치한 폴더
+```
 
 ## 설정 (`config.yaml`)
 
@@ -85,13 +164,6 @@ app.register_blueprint(make_service_control(get_services, cfg))
 | `notify.py` | Mattermost / Telegram 알림 |
 | `config.example.yaml`, `secrets.example.yaml` | 설정 예시 |
 | `install.sh` | 설치·업데이트 스크립트 |
+| `VERSION` | 현재 버전 (화면 아래에 표시) |
 | `demo.py` | 가짜 데이터로 화면만 확인 (`BC250_DEMO=1 python app.py`) |
 | `mcp_watchdog.py` | (선택) Hermes 에이전트용 자동 복구. 설정이 없으면 아무것도 안 함 |
-
-## 업데이트
-
-```bash
-cd Server-Dash && git pull && bash install.sh
-```
-
-`config.yaml` 과 `secrets.yaml` 은 git 에 안 올라가니까 업데이트해도 그대로야.
