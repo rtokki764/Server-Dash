@@ -1,0 +1,14 @@
+# 내 서버의 실제 설정과 비밀 (절대 올리지 않기)
+config.yaml
+secrets.yaml
+
+# 실행하면 생기는 기록
+.venv/
+__pycache__/
+ack.json
+seen.json
+notify_state.json
+notify_settings.json
+services_extra.json
+watchdog.log
+watchdog.state.json

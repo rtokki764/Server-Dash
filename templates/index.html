@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<!-- 앱 설치(PWA): Cloudflare Access 로그인 쿠키를 같이 보내야 해서 use-credentials -->
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="static/icon-192.png">
+<link rel="apple-touch-icon" href="static/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="{{ title }}">
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --line: #e6e5e0; --fg: #1d1d1b; --muted: #77766f; --faint: #a9a8a1;
+    --ok: #2f9e5b; --warn: #c98a12; --bad: #d4483b; --accent: #3a6fd8;
+    --ok-bg: #e8f5ec; --warn-bg: #fbf1dc; --bad-bg: #fbe6e3; --chip: #f0efeb;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0e10; --panel: #16171a; --line: #24262a; --fg: #eceef1; --muted: #8d9199; --faint: #5c6068;
+      --ok: #3ecf7e; --warn: #f0b23e; --bad: #ff6b5e; --accent: #5c9dff;
+      --ok-bg: #12291c; --warn-bg: #30260f; --bad-bg: #36181a; --chip: #1e2024;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.5 "Pretendard", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 20px 48px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* 헤더 */
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+  .title { display: flex; align-items: center; gap: 12px; }
+  h1 { font-size: 32px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px;
+          font-size: 14.5px; font-weight: 600; background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  .clock { text-align: right; }
+  .clock .time { font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+  .clock .meta { color: var(--muted); font-size: 13px; }
+  .stale { color: var(--bad); font-weight: 600; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; min-height: 0; }
+  .badge { font-size: 12.5px; padding: 3px 9px; border-radius: 6px; font-weight: 550; }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.bad { background: var(--bad-bg); color: var(--bad); }
+  .badge.ack { background: var(--chip); color: var(--muted); cursor: pointer; }
+
+  /* 실패한 서비스 + 인지함 버튼 */
+  .fl { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .fl:first-child { border-top: 0; padding-top: 2px; }
+  .fl .mid { flex: 1; min-width: 0; }
+  .fl .nm { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .fl .sb { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+  .fl.acked .nm { color: var(--muted); }
+  .ackt { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--chip); color: var(--muted); font-weight: 550; }
+  .btn { appearance: none; font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 12px; border-radius: 7px; cursor: pointer;
+         border: 1px solid var(--line); background: var(--panel); color: var(--fg); white-space: nowrap; flex: none; }
+  .btn:hover { border-color: var(--muted); }
+  .btn.ghost { color: var(--muted); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.mini { font-size: 11.5px; padding: 1px 8px; border-radius: 5px; font-weight: 600; }
+
+  /* 토글 스위치 (켜짐/꺼짐 상태는 전부 이걸로) */
+  .tg { appearance: none; border: 0; background: none; padding: 2px 0; font: inherit; color: var(--muted); cursor: pointer;
+        display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; flex: none; -webkit-tap-highlight-color: transparent; }
+  .tg i { position: relative; width: 36px; height: 21px; border-radius: 11px; background: var(--line); transition: background .18s; flex: none; }
+  .tg i::after { content: ""; position: absolute; top: 2.5px; left: 2.5px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+                 box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .18s; }
+  .tg[aria-checked="true"] { color: var(--fg); }
+  .tg[aria-checked="true"] i { background: var(--accent); }
+  .tg[aria-checked="true"] i::after { transform: translateX(15px); }
+  .tg:disabled { opacity: .5; cursor: default; }
+  .tg.sm i { width: 30px; height: 17px; } .tg.sm i::after { width: 12px; height: 12px; }
+  .tg.sm[aria-checked="true"] i::after { transform: translateX(13px); }
+  .days { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  .day { appearance: none; font: inherit; font-size: 12.5px; font-weight: 600; width: 32px; height: 30px; border-radius: 8px; cursor: pointer;
+         border: 1px solid var(--line); background: var(--panel); color: var(--muted); -webkit-tap-highlight-color: transparent; }
+  .day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .qform { display: flex; flex-direction: column; gap: 10px; }
+  .qline { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .qline .lb { color: var(--muted); font-size: 12.5px; min-width: 52px; }
+  .qform input[type=time] { font: inherit; font-size: 14px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
+                            background: var(--panel); color: var(--fg); color-scheme: light dark; }
+  .qform.off .qopt { opacity: .45; }
+  .saved { color: var(--ok); font-size: 12px; font-weight: 600; }
+  .svc .tg { margin-left: auto; }
+  .newc { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+  .fl .acts { display: flex; gap: 6px; flex: none; }
+  .oth { display: inline-flex; align-items: center; gap: 4px; margin: 0 10px 4px 0; }
+  .oth .btn { padding: 0 6px; line-height: 1.4; }
+  .modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0,0,0,.45); padding: 16px; }
+  .mbox { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 14px; width: 100%; max-width: 420px;
+          box-shadow: 0 10px 40px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 12px; }
+  .mbox h3 { margin: 0; font-size: 16px; }
+  .mbox label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .mbox input[type=text] { font: inherit; font-size: 15px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  .mbox .info { font-size: 12.5px; color: var(--muted); background: var(--bg); border-radius: 8px; padding: 8px 10px; line-height: 1.6; }
+  .mbox .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .mbox .btns .btn { font-size: 14px; padding: 7px 16px; }
+  .mbox .err { color: var(--bad); font-size: 12.5px; }
+  .svc.acked { color: var(--muted); }
+  .mi .nm .tg { margin-left: auto; }
+  .tile.acked .val { color: var(--muted); } .tile.acked .bar > i { background: var(--faint); opacity: 1; }
+  .mr.acked .vl { color: var(--muted); }
+
+  /* 탭 */
+  nav { display: flex; gap: 4px; margin: 22px 0 18px; border-bottom: 1px solid var(--line); }
+  nav button { appearance: none; border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600;
+               padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  nav button[aria-selected="true"] { color: var(--fg); border-color: var(--fg); }
+  nav .cnt { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px;
+             font-size: 11px; background: var(--warn-bg); color: var(--warn); }
+  nav .cnt.bad { background: var(--bad-bg); color: var(--bad); }
+  section[hidden] { display: none; }
+
+  /* 카드 */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .grid-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .tile .label { color: var(--muted); font-size: 12.5px; display: flex; justify-content: space-between; }
+  .tile .val { font-size: 28px; font-weight: 600; letter-spacing: -.02em; margin-top: 2px; }
+  .tile .unit { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+  .tile .foot { color: var(--muted); font-size: 12px; }
+  .tile.warn .val { color: var(--warn); } .tile.bad .val { color: var(--bad); }
+  .bar { height: 4px; background: var(--chip); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--fg); opacity: .55; border-radius: 2px; }
+  .tile.warn .bar > i { background: var(--warn); opacity: 1; } .tile.bad .bar > i { background: var(--bad); opacity: 1; }
+
+  .strip { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 14px 2px 22px; color: var(--muted); font-size: 13px; }
+  .strip b { color: var(--fg); font-weight: 600; }
+
+  h2 { font-size: 15px; font-weight: 650; margin: 26px 0 10px; }
+  h2:first-child { margin-top: 0; }
+  .grid-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  .chart h3 { font-size: 13.5px; font-weight: 600; margin: 0; display: flex; justify-content: space-between; }
+  .chart h3 span { color: var(--muted); font-weight: 500; }
+  .plot { position: relative; height: 130px; margin-top: 8px; }
+  .plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .tip { position: absolute; top: 0; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+         border-radius: 6px; padding: 3px 8px; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .tip span { color: var(--muted); margin-right: 6px; }
+
+  /* Hermes */
+  .bots { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .bot .top { display: flex; align-items: center; gap: 8px; }
+  .bot .nm { font-size: 16px; font-weight: 650; }
+  .bot .rl { color: var(--muted); font-size: 12.5px; }
+  .bot .md { color: var(--muted); font-size: 12px; font-family: var(--mono); margin: 4px 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bot .st { display: flex; gap: 16px; font-size: 13px; margin-bottom: 10px; }
+  .bot .st span { color: var(--muted); } .bot .st b { font-weight: 600; }
+  .bot.bad { border-color: var(--bad); }
+  .rows { display: flex; flex-direction: column; }
+  .row { display: grid; grid-template-columns: 110px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); align-items: start; }
+  .row:first-child { border-top: 0; padding-top: 2px; }
+  .row > .k { color: var(--muted); font-size: 13px; padding-top: 3px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 7px; padding: 4px 10px; font-size: 13px; }
+  .chip small { color: var(--muted); }
+  a.chip { color: inherit; text-decoration: none; cursor: pointer; }
+  a.chip:hover { outline: 1px solid var(--muted); }
+  a.chip .go { color: var(--muted); font-size: 11px; margin-left: -2px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; display: inline-block; }
+  .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); } .dot.off { background: var(--faint); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
+  .log { font-family: var(--mono); font-size: 12px; line-height: 1.55; margin-top: 8px; max-height: 340px; overflow: auto;
+         background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+  .log div { white-space: pre-wrap; word-break: break-all; }
+  .log .t { color: var(--faint); margin-right: 8px; }
+  .log .WARNING { color: var(--warn); } .log .ERROR, .log .CRITICAL { color: var(--bad); }
+
+  /* 서비스 표 */
+  .tbl { width: 100%; border-collapse: collapse; }
+  .tbl th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 0 10px 8px; border-bottom: 1px solid var(--line); }
+  .tbl td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl .r { text-align: right; }
+  .svc { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .svc-sub { color: var(--muted); font-size: 12px; margin-left: 16px; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--chip); color: var(--muted); margin-left: 6px; font-weight: 500; }
+  .exp { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; white-space: nowrap; }
+  .exp.internal { color: var(--muted); }
+  .exp.lan { color: var(--fg); }
+  .exp.internet { color: var(--fg); font-weight: 550; }
+  .exp-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .exp-sub.warn { color: var(--warn); } .exp-sub.bad { color: var(--bad); } .exp-sub.ok { color: var(--ok); }
+  .port { font-family: var(--mono); font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+  #unknown-wrap h2, #failed-wrap h2, #notify-wrap h2 { margin-top: 26px; }
+  .others { color: var(--muted); font-size: 13px; line-height: 1.8; margin-top: 8px; }
+  .empty { color: var(--muted); font-size: 13px; }
+  /* 알림 칸 */
+  .nt-it { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; flex-wrap: wrap; }
+  .nt-it .tx { font-weight: 550; }
+  .nt-it .st { color: var(--muted); font-size: 12.5px; }
+  .nt-id { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .nt-log { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12.5px; align-items: baseline; }
+  .nt-log .t { color: var(--muted); white-space: nowrap; }
+  .nt-log .r { color: var(--muted); font-size: 12px; }
+  .nt-log .r.bad { color: var(--bad); }
+  .nt-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
+  .foot { text-align: center; color: var(--faint); font-size: 11.5px; margin-top: 36px; letter-spacing: .01em; }
+  /* ───── 모바일 전용 요소 (PC에서는 숨김) ───── */
+  .m-only { display: none; }
+  @media (max-width: 720px) {
+    .hide-sm { display: none; }
+    .row { grid-template-columns: 1fr; gap: 6px; }
+    .d-only { display: none !important; }
+    .m-only { display: block; }
+    body { font-size: 15px; }
+    .wrap { padding: 0 14px calc(84px + env(safe-area-inset-bottom)); }
+
+    /* 위쪽 고정 헤더 */
+    .mhead { position: sticky; top: 0; z-index: 5; margin: 0 -14px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+             background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+             border-bottom: 1px solid var(--line); }
+    .mhead .r1 { display: flex; align-items: center; justify-content: space-between; }
+    .mhead .ttl { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+    .mhead .pill { font-size: 12px; padding: 2px 8px; }
+    .mhead .clk { font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+    .mhead .r2 { color: var(--muted); font-size: 12.5px; margin-top: 2px; display: flex; justify-content: space-between; }
+
+    /* 알림 카드 */
+    .malert { margin: 12px 0 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
+    .malert.ok { color: var(--ok); padding: 11px 14px; font-size: 14px; font-weight: 600; }
+    .malert summary { list-style: none; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
+                      color: var(--fg); font-size: 14.5px; font-weight: 600; }
+    .malert summary::-webkit-details-marker { display: none; }
+    .malert summary .chev { color: var(--muted); transition: transform .2s; }
+    .malert[open] summary .chev { transform: rotate(180deg); }
+    .malert.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+    .malert.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+    .malert .it { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+    .malert .it > span:nth-child(2) { flex: 1; min-width: 0; }
+    .malert .it.acked { color: var(--muted); }
+    .malert.ok summary { color: var(--ok); }
+
+    /* 목록 카드 공통 */
+    .mlist { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-bottom: 14px; }
+    .mlist-h { font-size: 12.5px; color: var(--muted); font-weight: 600; margin: 18px 4px 8px; letter-spacing: .02em; }
+    .mr { display: grid; grid-template-columns: 74px 64px 1fr; align-items: center; gap: 10px; padding: 13px 14px;
+          border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    .mr:first-child { border-top: 0; }
+    .mr .lb { color: var(--muted); font-size: 13.5px; }
+    .mr .vl { font-size: 19px; font-weight: 650; text-align: right; letter-spacing: -.02em; }
+    .mr .vl small { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 1px; }
+    .mr.warn .vl { color: var(--warn); } .mr.bad .vl { color: var(--bad); }
+    .mr svg.spark { width: 100%; height: 28px; display: block; }
+    .mr .mbar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+    .mr .mbar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+    .mx { display: none; padding: 4px 14px 14px; }
+    .mx.open { display: block; }
+    .mx .plot { height: 150px; }
+    .mfacts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
+    .mfacts div { background: var(--panel); padding: 10px 14px; font-size: 12.5px; color: var(--muted); }
+    .mfacts b { display: block; color: var(--fg); font-size: 15px; font-weight: 600; margin-top: 1px; }
+
+    /* 봇 / 서비스 한 줄 목록 */
+    .mi { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
+    .mi:first-child { border-top: 0; }
+    .mi .av { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; font-weight: 700; font-size: 15px;
+              color: #fff; background: var(--c, var(--accent)); flex: none; }
+    .mi .mid { flex: 1; min-width: 0; }
+    .mi .nm { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+    .mi .nm small { color: var(--muted); font-weight: 500; font-size: 12px; }
+    .mi .sb { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+    .mi .sb.warn { color: var(--warn); } .mi .sb.bad { color: var(--bad); }
+    .mi .rt { text-align: right; font-size: 12.5px; color: var(--muted); flex: none; }
+    .mi .rt .port { font-size: 13px; color: var(--fg); }
+    .mi .dot { width: 9px; height: 9px; }
+
+    /* 아래 고정 탭 바 */
+    .mtab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; margin: 0; border: 0;
+            padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--panel) 92%, transparent);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-top: 1px solid var(--line); }
+    .mtab button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; border: 0;
+                   border-radius: 10px; font-size: 11.5px; position: relative; margin: 0; }
+    .mtab button .ic { font-size: 19px; line-height: 1; filter: grayscale(1); opacity: .6; }
+    .mtab button[aria-selected="true"] { color: var(--fg); background: var(--chip); }
+    .mtab button[aria-selected="true"] .ic { filter: none; opacity: 1; }
+    .mtab .cnt { position: absolute; top: 2px; left: calc(50% + 8px); margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- 모바일 헤더 -->
+  <div class="mhead m-only">
+    <div class="r1"><div class="ttl">{{ title }} <span id="m-pill" class="pill">●</span></div><div class="clk num" id="m-clock">--:--:--</div></div>
+    <div class="r2 num"><span>가동 <span id="m-up">—</span></span><span>갱신 <span id="m-age">—</span></span></div>
+  </div>
+  <div id="m-alert" class="m-only"></div>
+  <header class="d-only">
+    <div>
+      <div class="title"><h1>{{ title }}</h1><span id="overall" class="pill">● 불러오는 중</span></div>
+      <div class="sub" id="host">—</div>
+    </div>
+    <div class="clock">
+      <div class="time num" id="clock">--:--:--</div>
+      <div class="meta num"><span id="date">—</span> · 가동 <span id="uptime" title="">—</span></div>
+      <div class="meta num">갱신 <span id="age">—</span></div>
+    </div>
+  </header>
+  <div class="badges d-only" id="badges"></div>
+
+  <nav role="tablist" class="d-only">
+    <button role="tab" data-tab="overview" aria-selected="true">개요</button>
+    <button role="tab" data-tab="hermes">Agent <span class="cnt" id="cnt-hermes" hidden></span></button>
+    <button role="tab" data-tab="services">서비스·포트 <span class="cnt" id="cnt-services" hidden></span></button>
+  </nav>
+
+  <!-- ───────── 개요 ───────── -->
+  <section id="tab-overview">
+    <div class="m-only">
+      <div class="mlist-h">지금 상태 · 줄을 누르면 6시간 그래프</div>
+      <div class="mlist" id="m-rows"></div>
+      <div class="mlist"><div class="mfacts num" id="m-facts"></div></div>
+    </div>
+    <div class="d-only">
+      <div class="grid-tiles" id="tiles"></div>
+      <div class="strip num" id="strip"></div>
+      <h2>최근 6시간</h2>
+      <div class="grid-charts" id="charts"></div>
+    </div>
+  </section>
+
+  <!-- ───────── Hermes ───────── -->
+  <section id="tab-hermes" hidden>
+    <div class="m-only"><div class="mlist-h">봇</div><div class="mlist" id="m-bots"></div><div class="mlist-h">게이트웨이 · MCP · 경고</div></div>
+    <div class="bots d-only" id="bots"></div>
+    <div class="card">
+      <div class="rows" id="hermes-rows"></div>
+      <details>
+        <summary>최근 로그 보기</summary>
+        <div class="log" id="hermes-log"></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ───────── 서비스·포트 ───────── -->
+  <section id="tab-services" hidden>
+    <div class="m-only" id="m-svc"></div>
+    <div id="new-wrap" class="d-only"></div>
+    <div class="legend d-only">
+      <span>🔒 내부 전용: 이 서버 자신만</span><span>🏢 사내망: 같은 네트워크 어디서나</span><span>🌐 인터넷: Cloudflare 터널로 공개</span>
+    </div>
+    <div class="card d-only" style="padding-top:12px">
+      <table class="tbl">
+        <thead><tr><th>서비스명</th><th>관리</th><th>포트</th><th>노출</th><th class="r hide-sm">가동 시간</th><th>상태</th></tr></thead>
+        <tbody id="svc-body"></tbody>
+      </table>
+    </div>
+    <details class="card d-only" style="margin-top:12px" id="failed-det" hidden>
+      <summary id="failed-sum">실패한 서비스</summary><div id="failed-body"></div>
+    </details>
+    <details class="card d-only" style="margin-top:12px" id="notify-det">
+      <summary id="notify-sum">🔔 알림</summary><div id="notify-body"></div>
+    </details>
+    <details class="card d-only" style="margin-top:12px" id="unknown-det" hidden>
+      <summary id="unknown-sum">목록에 없는 포트</summary><div id="unknown-body"></div>
+    </details>
+    <details class="card d-only" style="margin-top:12px">
+      <summary id="others-sum">목록에 없는 서비스</summary>
+      <div class="others" id="others"></div>
+    </details>
+  </section>
+  <footer class="foot num">{{ title }} 대시보드{% if version %} v{{ version }}{% endif %}{% if author %} · 작성 {{ author }}{% endif %}{% if updated %} · {{ updated }}{% endif %}</footer>
+</div>
+
+<!-- 모바일 아래 탭 바 -->
+<nav class="mtab m-only" role="tablist">
+  <button data-tab="overview" aria-selected="true"><span class="ic">📊</span>개요</button>
+  <button data-tab="hermes"><span class="ic">🤖</span>Agent<span class="cnt" id="m-cnt-hermes" hidden></span></button>
+  <button data-tab="services"><span class="ic">🔌</span>서비스<span class="cnt" id="m-cnt-services" hidden></span></button>
+</nav>
+
+<!-- [목록에 추가] 창 -->
+<div id="addModal" class="modal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true">
+    <h3>목록에 추가</h3>
+    <label>이름<input type="text" id="am-name" maxlength="60"></label>
+    <div class="info" id="am-info"></div>
+    <label>메모 (선택)<input type="text" id="am-note" maxlength="120" placeholder="예) Tessa 음성 통화 에이전트"></label>
+    <div><button type="button" class="tg" role="switch" aria-checked="false" id="am-opt"><span>선택 서비스 · 일부러 꺼 둘 때가 있음 (꺼져도 경고 안 함)</span><i></i></button></div>
+    <div class="err" id="am-err" hidden></div>
+    <div class="btns"><button type="button" class="btn ghost" id="am-cancel">취소</button><button type="button" class="btn" id="am-ok">추가</button></div>
+  </div>
+</div>
+<script>
+const REFRESH = {{ refresh }} * 1000;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const TZ = "Asia/Seoul";
+const OPEN = {{ open_cfg | tojson }};
+const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+// 봇 대화방을 앱으로 바로 여는 주소 (없으면 null → 그냥 칩)
+function appLink(bot, plat) {
+  if (plat === "Mattermost" && bot.mm_user && OPEN.team) {
+    const host = (!IS_MOBILE && OPEN.at_office && OPEN.server_office) ? OPEN.server_office : OPEN.server;
+    return host ? `mattermost://${host}/${OPEN.team}/messages/@${bot.mm_user}` : null;
+  }
+  if (plat === "Telegram") return bot.tg_user ? `tg://resolve?domain=${bot.tg_user}` : null;
+  return null;
+}
+// 칩: 링크가 있으면 누를 수 있게 <a>
+function linkChip(href, inner, title) {
+  return href ? `<a class="chip" href="${esc(href)}" title="${esc(title)}">${inner}<span class="go">↗</span></a>` : `<span class="chip">${inner}</span>`;
+}
+let S = null, H = [], offset = 0, lastFetch = 0;
+
+// ── 포맷 도우미 ──
+const f1 = (v) => v == null ? "—" : Number(v).toFixed(1);
+const f0 = (v) => v == null ? "—" : Math.round(v).toLocaleString("ko-KR");
+function dur(sec) {
+  if (sec == null || sec < 0) return "—";
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  if (d) return `${d}일 ${h}시간`;
+  if (h) return `${h}시간 ${m}분`;
+  return `${m}분`;
+}
+const hm = (t) => new Date(t * 1000).toLocaleTimeString("en-GB", {timeZone: TZ, hour: "2-digit", minute: "2-digit"});
+const hms = (t) => new Date(t * 1000).toLocaleTimeString("en-GB", {timeZone: TZ});
+const ago = (t) => t == null ? "—" : (Date.now() / 1000 + offset - t < 60 ? "방금" : dur(Date.now() / 1000 + offset - t) + " 전");
+function lvl(v, r) { if (v == null || !r) return "ok"; return v >= r.bad ? "bad" : v >= r.warn ? "warn" : "ok"; }
+
+// ── 탭 ──
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", x.dataset.tab === b.dataset.tab));
+  window.scrollTo(0, 0);
+  document.querySelectorAll("section").forEach((s) => s.hidden = s.id !== "tab-" + b.dataset.tab);
+  location.hash = b.dataset.tab;
+  if (b.dataset.tab === "overview") drawCharts();
+}));
+if (location.hash) document.querySelector(`nav button[data-tab="${location.hash.slice(1)}"]`)?.click();
+
+// ── 시계 (서버 시각 기준, 1초마다) ──
+function tick() {
+  const now = Date.now() / 1000 + offset;
+  $("clock").textContent = hms(now);
+  $("date").textContent = new Date(now * 1000).toLocaleDateString("ko-KR", {timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short"});
+  if (S) {
+    const up = now - S.boot_time;
+    $("uptime").textContent = `${Math.floor(up / 86400)}일 ${Math.floor(up % 86400 / 3600)}시간 ${Math.floor(up % 3600 / 60)}분`;
+    const age = Math.round((Date.now() - lastFetch) / 1000);
+    $("age").textContent = age < 2 ? "방금" : `${age}초 전`;
+    $("age").className = age > 30 ? "stale" : "";
+    $("m-clock").textContent = hms(now).slice(0, 5);
+    $("m-up").textContent = `${Math.floor(up / 86400)}일 ${Math.floor(up % 86400 / 3600)}시간`;
+    $("m-age").textContent = $("age").textContent; $("m-age").className = $("age").className;
+  }
+}
+setInterval(tick, 1000);
+
+// ── 데이터 받기 ──
+async function load() {
+  try {
+    const r = await fetch("api/status", {cache: "no-store"});
+    const j = await r.json();
+    if (j.loading) return;
+    S = j; offset = S.server_time - Date.now() / 1000; lastFetch = Date.now();
+    render();
+  } catch (e) { /* 연결 실패 → 갱신 시간이 계속 늘어나며 빨간색으로 표시됨 */ }
+}
+async function loadHistory() {
+  try { H = await (await fetch("api/history", {cache: "no-store"})).json(); drawCharts(); if (S) renderMobile(); } catch (e) {}
+}
+
+// ── 전체 그리기 ──
+function render() {
+  const statusText = {ok: "정상", warn: "확인 필요", bad: "문제 있음"}[S.overall];
+  $("overall").className = "pill " + S.overall;
+  $("overall").textContent = "● " + statusText;
+  // 제목이 hostname 그대로면 중복이니까 IP만, 제목을 따로 정했으면 hostname · IP
+  $("host").textContent = [S.title === S.hostname ? "" : S.hostname, S.ip].filter(Boolean).join(" · ");
+  // hermes 설정이 없는 서버는 Agent 탭을 숨김
+  document.querySelectorAll('[data-tab="hermes"]').forEach((b) => { b.style.display = S.agent_enabled === false ? "none" : ""; });
+  $("uptime").title = "부팅: " + new Date(S.boot_time * 1000).toLocaleString("ko-KR", {timeZone: TZ});
+  $("badges").innerHTML = S.badges.map((b) => `<span class="badge ${b.level}">${esc(b.text)}</span>`).join("") +
+    (S.acked || []).map((a) => `<span class="badge ack" data-goto="${a.tab}" title="인지함 · 눌러서 보기">✓ ${esc(a.text)}</span>`).join("");
+  renderOverview(); renderHermes(); renderServices(); renderMobile(); tick();
+}
+
+function renderOverview() {
+  const h = S.hw, T = S.thresholds;
+  const MA = S.metric_acks || {};
+  // 메모리·스왑·디스크: 노랑/빨강이면 [인지함], 인지한 상태면 회색 + [취소]
+  const ackBtn = (k, lv) => MA[k] || lv !== "ok"
+    ? tg(`data-mack="${k}" data-on="${MA[k] ? 0 : 1}" title="${MA[k] && MA[k].until ? hm(MA[k].until) + "에 다시 알림" : "알고 있는 문제면 켜 줘"}"`, !!MA[k], "인지", "sm") : "";
+  const mlv = (k, lv) => MA[k] ? "acked" : lv;
+  const tile = (label, val, unit, foot, pct, lv, right = "") => `
+    <div class="card tile ${lv}">
+      <div class="label"><span>${label}</span><span>${right}</span></div>
+      <div class="val num">${val}<span class="unit">${unit}</span></div>
+      <div class="foot num">${foot}</div>
+      ${pct != null ? `<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div>` : ""}
+    </div>`;
+  $("tiles").innerHTML = [
+    tile("GPU", f0(h.gpu_pct), "%", h.gen_tps ? `생성 ${f1(h.gen_tps)} tok/s` : (h.gpu_mhz != null ? `클럭 ${f0(h.gpu_mhz)} MHz` : "—"), h.gpu_pct, "ok"),
+    tile("CPU", f0(h.cpu_pct), "%", "16스레드 평균", h.cpu_pct, "ok"),
+    tile("APU 온도", f1(h.apu_temp), "°C", `한계 ${T.apu_temp_c.bad}°C`, h.apu_temp != null ? h.apu_temp / T.apu_temp_c.bad * 100 : null, lvl(h.apu_temp, T.apu_temp_c)),
+    tile("메모리", f1(h.mem_used), "GB", `${f1(h.mem_total)} GB 중 ${f0(h.mem_pct)}%`, h.mem_pct, mlv("mem_pct", lvl(h.mem_pct, T.mem_pct)), ackBtn("mem_pct", lvl(h.mem_pct, T.mem_pct))),
+    tile("스왑", f1(h.swap_used), "GB", `${f1(h.swap_total)} GB 중 ${f0(h.swap_pct)}%`, h.swap_pct, mlv("swap_pct", lvl(h.swap_pct, T.swap_pct)), ackBtn("swap_pct", lvl(h.swap_pct, T.swap_pct))),
+    tile("디스크", f0(h.disk_used), "GB", `${f0(h.disk_total)} GB 중 ${f0(h.disk_pct)}%`, h.disk_pct, mlv("disk_pct", lvl(h.disk_pct, T.disk_pct)), ackBtn("disk_pct", lvl(h.disk_pct, T.disk_pct))),
+  ].join("");
+  const vram = h.vram_used != null ? `<b>${f1(h.vram_used)}</b> / ${f1(h.vram_total)} GB` : "—";
+  const gtt = h.gtt_used != null ? `<b>${f1(h.gtt_used)}</b> / ${f1(h.gtt_total)} GB` : "—";
+  $("strip").innerHTML = [
+    `APU 전력 <b>${f1(h.apu_power)}</b> W`, `GPU 온도 <b>${f1(h.gpu_temp)}</b>°C`, `GPU 클럭 <b>${f0(h.gpu_mhz)}</b> MHz`,
+    `펌프 팬 <b>${f0(h.pump_rpm)}</b> RPM`, `VRAM ${vram}`, `GTT ${gtt}`,
+  ].map((x) => `<span>${x}</span>`).join("");
+  drawCharts();
+}
+
+// ── 그래프 (SVG 직접 그리기) ──
+const CHARTS = [
+  {key: "gpu_pct", title: "GPU", unit: "%", min: 0, max: 100},
+  {key: "cpu_pct", title: "CPU", unit: "%", min: 0, max: 100},
+  {key: "apu_temp", title: "APU 온도", unit: "°C", min: 30, max: 100, ref: () => S?.thresholds.apu_temp_c.bad},
+  {key: "mem_pct", title: "메모리", unit: "%", min: 0, max: 100},
+  {key: "swap_pct", title: "스왑", unit: "%", min: 0, max: 100, ref: () => S?.thresholds.swap_pct.bad},
+  {key: "apu_power", title: "APU 전력", unit: "W", min: 0, max: null},
+];
+function drawCharts() {
+  const box = $("charts");
+  if ($("tab-overview").hidden) return;
+  if (!box.children.length) {
+    box.innerHTML = CHARTS.map((c) => `<div class="card chart"><h3>${c.title} <span id="cv-${c.key}"></span></h3><div class="plot" id="pl-${c.key}"></div></div>`).join("");
+  }
+  CHARTS.forEach((c) => line($("pl-" + c.key), c));
+}
+function line(el, c) {
+  const pts = H.filter((p) => p[c.key] != null).map((p) => [p.t, p[c.key]]);
+  const last = pts.length ? pts[pts.length - 1][1] : null;
+  if ($("cv-" + c.key)) $("cv-" + c.key).textContent = last != null ? `${f1(last)}${c.unit}` : "";
+  const W = el.clientWidth || 300, Hh = el.clientHeight || 130;
+  if (pts.length < 2) { el.innerHTML = `<div class="empty" style="padding-top:50px;text-align:center">기록이 쌓이는 중…</div>`; return; }
+  const ref = c.ref ? c.ref() : null;
+  const vmax = c.max ?? Math.max(10, Math.ceil(Math.max(...pts.map((p) => p[1])) * 1.15 / 10) * 10);
+  const L = 30, R = 6, Tp = 6, B = 18;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  const x = (t) => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
+  const y = (v) => Tp + (1 - (Math.min(Math.max(v, c.min), vmax) - c.min) / (vmax - c.min)) * (Hh - Tp - B);
+  const ticks = [c.min, (c.min + vmax) / 2, vmax];
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none">`;
+  ticks.forEach((v) => s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>
+    <text x="${L - 6}" y="${y(v)}" dy="0.32em" text-anchor="end" font-size="10.5" fill="var(--faint)">${Math.round(v)}</text>`);
+  for (let h = Math.ceil(t0 / 7200) * 7200; h <= t1; h += 7200)
+    s += `<text x="${x(h)}" y="${Hh - 2}" text-anchor="middle" font-size="10.5" fill="var(--faint)">${hm(h)}</text>`;
+  if (ref != null) s += `<line x1="${L}" x2="${W - R}" y1="${y(ref)}" y2="${y(ref)}" stroke="var(--bad)" stroke-dasharray="4 3" opacity=".7"/>`;
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  const lv = ref != null && last >= ref ? "var(--bad)" : "var(--accent)";
+  s += `<path d="${d}L${x(t1)},${y(c.min)}L${x(t0)},${y(c.min)}Z" fill="${lv}" opacity=".08"/>`;
+  s += `<path d="${d}" fill="none" stroke="${lv}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (ref != null) pts.filter((p) => p[1] >= ref).forEach((p) => s += `<circle cx="${x(p[0])}" cy="${y(p[1])}" r="2.5" fill="var(--bad)"/>`);
+  s += `<line class="hl" y1="${Tp}" y2="${Hh - B}" stroke="var(--muted)" opacity="0"/><circle class="hd" r="3.5" fill="${lv}" opacity="0"/>`;
+  s += `<rect x="${L}" y="0" width="${W - L - R}" height="${Hh}" fill="transparent"/></svg><div class="tip" hidden></div>`;
+  el.innerHTML = s;
+  const svg = el.querySelector("svg"), tip = el.querySelector(".tip"), hl = el.querySelector(".hl"), hd = el.querySelector(".hd");
+  svg.addEventListener("pointermove", (e) => {
+    const px = (e.clientX - svg.getBoundingClientRect().left) / el.clientWidth * W;
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px)) best = p;
+    hl.setAttribute("x1", x(best[0])); hl.setAttribute("x2", x(best[0])); hl.setAttribute("opacity", ".4");
+    hd.setAttribute("cx", x(best[0])); hd.setAttribute("cy", y(best[1])); hd.setAttribute("opacity", "1");
+    tip.innerHTML = `<span>${hm(best[0])}</span>${f1(best[1])}${c.unit}`; tip.hidden = false;
+    const left = x(best[0]) / W * el.clientWidth + 10;
+    tip.style.left = Math.min(left, el.clientWidth - tip.offsetWidth) + "px";
+  });
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; hl.setAttribute("opacity", "0"); hd.setAttribute("opacity", "0"); });
+}
+window.addEventListener("resize", () => { clearTimeout(window._rz); window._rz = setTimeout(drawCharts, 150); });
+
+// ── Hermes ──
+function renderHermes() {
+  const hz = S.hermes || {};
+  const gw = S.services.filter((s) => ["hermes-gateway", "hermes-serve", "mcphub"].includes(s.name));
+  const chip = (st, name, small = "") => `<span class="chip"><span class="dot ${st}"></span>${esc(name)}${small ? ` <small>${esc(small)}</small>` : ""}</span>`;
+  const logPlat = Object.fromEntries((hz.platforms || []).map((p) => [p.name, p]));
+  const plat = (hz.platforms || []).map((p) => chip(p.state, p.name,
+    p.state === "ok" ? (p.fails_1h ? `재연결 ${p.fails_1h}회/시간` : "정상") : `${p.state === "bad" ? "끊김" : "불안정"} · 최근 1시간 재연결 ${p.fails_1h}회`));
+  // 봇 카드 (gateway_state.json + state.db)
+  const bots = hz.bots || [];
+  $("bots").innerHTML = bots.map((b) => {
+    const pl = b.platforms.map((p) => {
+      const lp = logPlat[p.name];
+      const extra = lp && lp.fails_1h ? ` · 재연결 ${lp.fails_1h}회/시간` : "";
+      const lv = p.level === "ok" && lp && lp.state !== "ok" ? lp.state : p.level;
+      return linkChip(appLink(b, p.name), `<span class="dot ${lv}"></span>${esc(p.name)} <small>${esc((p.state === "connected" ? "연결됨" : p.state) + extra)}</small>`,
+        `${p.name} 앱에서 ${b.name} 대화방 열기`);
+    }).join("") || '<span class="empty">연결된 메신저 없음</span>';
+    return `<div class="card bot ${b.level}">
+      <div class="top"><span class="dot ${b.level}"></span><span class="nm">${esc(b.name)}</span><span class="rl">${esc(b.role || "")}</span>${b.parked ? '<span class="tag" style="color:var(--bad)">parked</span>' : ""}</div>
+      <div class="md" title="${esc(b.model || "")}">${esc(b.model || "모델 기록 없음")}</div>
+      <div class="st"><div><span>마지막 대화</span> <b>${b.last ? ago(b.last) : "—"}</b></div><div><span>오늘</span> <b>${b.today}</b>회</div></div>
+      <div class="chips">${pl}</div></div>`;
+  }).join("");
+  const wdl = (hz.watchdog || []).slice(-1)[0];
+  const wd = wdl ? `<div class="sub">🔧 자동 복구 · ${esc(ago(wdl.t))} · ${esc(wdl.msg)}</div>` : `<div class="sub">🔧 자동 복구 대기 중 (10분 넘게 끊기면 hermes-gateway 재시작)</div>`;
+  const gwInfo = hz.gateway ? `응답 ${ago(hz.gateway.heartbeat)} · v${esc(hz.gateway.version || "?")} · 처리 중 ${hz.gateway.active_agents ?? 0}` : "";
+  const mcp = (hz.mcp || []).map((m) => chip(m.level, m.name, m.state === "connected" ? "연결됨" : `${m.state} · ${hm(m.at)}부터`));
+  const grp = (hz.groups || []).sort((a, b) => b.count - a.count).map((g) => chip("warn", g.label, `${g.count}회 · 마지막 ${hm(g.last)}`));
+  $("hermes-rows").innerHTML = `
+    <div class="row"><div class="k">게이트웨이</div><div><div class="chips">${gw.map((s) => chip(s.state, s.name, s.since ? dur(Date.now() / 1000 + offset - s.since) : "")).join("")}</div>${gwInfo ? `<div class="sub">${gwInfo}</div>` : ""}</div></div>
+    ${bots.length ? "" : `<div class="row"><div class="k">메신저 연결</div><div class="chips">${plat.join("") || '<span class="empty">기록 없음</span>'}</div></div>`}
+    <div class="row"><div class="k">MCP 서버</div><div><div class="chips">${mcp.join("") || chip("ok", "mypc", "연결됨")}</div>${wd}</div></div>
+    <div class="row"><div class="k">최근 ${hz.window_h || 6}시간 경고</div><div class="chips">${grp.join("") || '<span class="empty">경고 없음</span>'}</div></div>`;
+  $("hermes-log").innerHTML = (hz.tail || []).slice().reverse().map((l) =>
+    `<div class="${esc(l.level)}"><span class="t">${hms(l.t)}</span>${esc(l.msg)}</div>`).join("") || '<span class="empty">로그 없음</span>';
+  const n = (hz.platforms || []).filter((p) => p.state !== "ok").length + (hz.mcp || []).filter((m) => m.level !== "ok").length + bots.filter((b) => b.level !== "ok").length;
+  const bad = (hz.platforms || []).some((p) => p.state === "bad") || (hz.mcp || []).some((m) => m.level === "bad") || bots.some((b) => b.level === "bad");
+  $("cnt-hermes").hidden = !n; $("cnt-hermes").textContent = n; $("cnt-hermes").className = "cnt" + (bad ? " bad" : "");
+}
+
+// ── 서비스·포트 ──
+function renderServices() {
+  const now = Date.now() / 1000 + offset;
+  const icon = {internal: "🔒", lan: "🏢", internet: "🌐"};
+  const word = {internal: "내부 전용", lan: "사내망", internet: ""};
+  $("svc-body").innerHTML = svcSort(S.services).map((s) => {
+    const sub = [s.model, s.used_by, s.note].filter(Boolean).join(" · ");
+    const scopeTag = s.scope === "manual" ? '<span class="tag">수동 실행</span>' : s.scope === "remote" ? '<span class="tag">원격</span>' : s.scope === "user" ? '<span class="tag">user</span>' : "";
+    let exp = '<span class="empty">—</span>';
+    if (s.exposure === "internet") {
+      const u = s.url;
+      const live = s.state === "off" ? "꺼짐" : u ? (u.ok ? `응답 ${u.code}` : `접속 안 됨${u.code ? " " + u.code : ""}`) : "확인 중";
+      exp = `<div class="exp internet">🌐 ${esc(s.subdomain)}</div>
+             <div class="exp-sub ${s.access ? "ok" : "warn"}">${s.access ? "🔐 Access 보호" : "⚠ 보호 없음"} · <span class="${u && !u.ok ? "bad" : ""}">${live}</span></div>`;
+    } else if (s.exposure) {
+      exp = `<span class="exp ${s.exposure}">${icon[s.exposure]} ${word[s.exposure]}</span>`;
+    }
+    const portCell = s.port ? `<span class="port">${s.port}</span>${s.listening === false ? '<div class="exp-sub bad">안 열림</div>' : ""}` : '<span class="empty">—</span>';
+    // "상태" 칸: 범위 태그 + 화면 추가/빼기 + 재시작 횟수 + 인지 토글을 전부 모아서
+    const stateCell = [
+      scopeTag || '<span class="tag">system</span>',
+      s.optional ? '<span class="tag">선택</span>' : "",
+      s.extra ? `<span class="tag">화면 추가</span><button type="button" class="btn mini ghost" data-rmsvc="${esc(s.name)}" title="목록에서 빼기">빼기</button>` : "",
+      s.restarts ? `<span class="tag" title="재시작 횟수">재시작 ${s.restarts}회</span>` : "",
+      s.acked ? '<span class="ackt">인지됨</span>' : "",
+      svcAck(s),
+    ].filter(Boolean).join(" ") || '<span class="empty">—</span>';
+    return `<tr>
+      <td><div class="svc ${s.acked ? "acked" : ""}"><span class="dot ${s.acked ? "off" : s.state}"></span>${esc(s.name)}</div>${sub ? `<div class="svc-sub">${esc(sub)}</div>` : ""}</td>
+      <td>${scBtn(s) || '<span class="empty">—</span>'}</td>
+      <td>${portCell}</td><td>${exp}</td>
+      <td class="r num hide-sm">${s.since ? dur(now - s.since) : '<span class="empty">—</span>'}</td>
+      <td><div class="svc" style="flex-wrap:wrap">${stateCell}</div></td></tr>`;
+  }).join("");
+
+  const unk = S.unknown_ports || [];
+  const unkLan = unk.some((u) => u.exposure === "lan" && !u.acked);
+  $("unknown-det").hidden = !unk.length;
+  $("unknown-sum").textContent = `${unkLan ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개${unkLan ? " · 알고 있는 포트면 인지 켜기" : unk.some((u) => u.acked) ? " · 사내망 포트는 인지함" : " · 전부 내부 전용이라 안전"}`;
+  $("unknown-body").innerHTML = `<table class="tbl"><tbody>${unk.map((u) => `<tr><td class="port">${u.port}</td>
+      <td><span class="exp ${u.exposure}">${icon[u.exposure]} ${word[u.exposure]}</span></td>
+      <td>${esc(u.proc || "?")} <span class="empty">pid ${u.pid ?? "?"}</span>${u.acked ? ' <span class="ackt">인지됨</span>' : ""}</td>
+      <td class="r"><span style="display:inline-flex;gap:8px;align-items:center">${addBtn(u.suggest)}${portAck(u)}</span></td></tr>`).join("")}</tbody></table>`;
+  $("new-wrap").innerHTML = (S.new_items || []).length ? `<h2>🆕 새로 생긴 것 <span style="color:var(--muted);font-weight:500;font-size:13px">설치 뒤 처음 보는 서비스·사내망 포트 · 목록에 올리거나 넘겨 줘</span></h2>
+    <div class="card newc">${newRows(S.new_items)}</div>` : "";
+
+  const others = S.other_services || [], failed = S.failed || [];
+  const live = failed.filter((f) => !f.acked);
+  $("failed-det").hidden = !failed.length;
+  $("failed-sum").textContent = `${live.length ? "⚠ " : ""}실패한 서비스 ${failed.length}개 · 알고 있는 문제면 인지를 켜 줘`;
+  $("failed-body").innerHTML = failedRows(failed);
+  $("notify-sum").textContent = `🔔 알림 · ${notifyHead(S.notify)}`;
+  if (!qBusy) $("notify-body").innerHTML = notifyBody(S.notify);
+  // 목록에 없는 서비스 (접힌 카드 · 이름 옆 + 버튼으로 바로 목록에 추가)
+  $("others-sum").textContent = `목록에 없는 서비스 ${others.length}개 · 보고 싶은 건 + 로 올려 줘`;
+  $("others").innerHTML = others.map((o) => `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}</span>`).join("");
+  const newPorts = new Set((S.new_items || []).map((it) => it.port).filter(Boolean));
+  const n = S.services.filter((s) => (s.state === "warn" || s.state === "bad") && !s.acked).length + unk.filter((u) => u.exposure === "lan" && !u.acked && !newPorts.has(u.port)).length + live.length + (S.new_items || []).length;
+  const bad = S.services.some((s) => s.state === "bad" && !s.acked) || live.length;
+  $("cnt-services").hidden = !n; $("cnt-services").textContent = n; $("cnt-services").className = "cnt" + (bad ? " bad" : "");
+}
+
+// ── 알림 칸 (PC·폰 같이 씀) ──
+function notifyBody(n) {
+  if (!n) return '<span class="empty">알림 정보 없음</span>';
+  const R = n.rules, sec = (x) => x >= 3600 ? `${Math.floor(x / 3600)}시간 ${Math.round(x % 3600 / 60)}분` : x >= 60 ? `${Math.round(x / 60)}분` : `${x}초`;
+  const ch = (on, name) => `<span class="chip"><span class="dot ${on ? "ok" : "off"}"></span>${name} <small>${on ? "설정됨" : "미설정"}</small></span>`;
+  const anyCh = n.channels.mattermost || n.channels.telegram;
+  const stText = (it) => ({
+    waiting: `대기 중 · ${sec(it.left)} 뒤 전송`, cooldown: `쿨다운 · ${sec(it.left)} 뒤 전송`,
+    sent: "보냄", resolving: `해결 확인 중 · ${sec(it.left)}`,
+    held: `🌙 모아 둠 · ${n.quiet && n.quiet.end ? n.quiet.end : ""} 요약에 포함`}[it.state] || it.state);
+  const items = n.items.map((it) => `<div class="nt-it"><span class="dot ${it.state === "resolving" ? "ok" : it.level}"></span>
+      <span class="tx">${esc(it.text)}</span><span class="st">${esc(stText(it))}</span><span class="nt-id">${esc(it.id)}</span></div>`).join("");
+  const log = n.log.map((l) => {
+    const res = Object.entries(l.results || {}).map(([k, v]) => `${k} ${v === "ok" ? "✓" : v}`).join(" · ");
+    const kind = {alert: "경고", resolved: "해결", test: "테스트", digest: "조용한 시간 요약", setting: "설정"}[l.kind] || "";
+    return `<span class="t num">${md(l.t)}</span><div><span class="dot ${l.ok ? "ok" : "bad"}"></span> ${esc(kind)} · ${esc((l.text || "").split("\n")[0])}
+      <div class="r ${l.ok ? "" : "bad"}">${esc(res)}</div></div>`;
+  }).join("");
+  const q = n.quiet || {};
+  const dset = new Set(q.days || []);
+  const dayBtns = [..."월화수목금토일"].map((nm, i) => `<button type="button" class="day ${dset.has(i) ? "on" : ""}" data-q="day" data-d="${i}">${nm}</button>`).join("");
+  const quietRow = `<div class="row"><div class="k">조용한 시간</div><div class="qform ${q.on ? "" : "off"}">
+      <div class="qline">${tg('data-q="enabled"', q.on, q.on ? "켜짐" : "꺼짐")}
+        <span class="qopt qline" style="gap:6px"><input type="time" data-q="start" value="${esc(q.start || "00:00")}"> ~ <input type="time" data-q="end" value="${esc(q.end || "08:00")}"></span>
+        ${Date.now() - qSavedAt < 3000 ? '<span class="saved">✓ 저장됨</span>' : ""}</div>
+      <div class="qline qopt"><span class="lb">요일</span><span class="days">${dayBtns}</span></div>
+      <div class="qline qopt"><span class="lb">주말</span>${tg('data-q="weekend_all_day"', q.weekend_all_day, "토·일은 하루 종일")}</div>
+      <div class="sub" style="margin-top:0">🔴빨강은 바로 보내고, 🟡노랑은 모았다가 조용한 시간이 끝나면 요약으로 보내</div>
+      ${q.now ? `<div class="sub" style="margin-top:0;color:var(--accent)">🌙 지금 조용한 시간 · ${sec(q.left || 0)} 남음 · 모아 둔 것 ${q.held}건</div>` : ""}
+    </div></div>`;
+  const mute = n.mute.length ? `<div class="sub">음소거: ${n.mute.map((m) => `<span class="nt-id">${esc(m)}</span>`).join(" ")}</div>` : "";
+  return `<div class="rows">
+    <div class="row"><div class="k">받을 곳</div><div><div class="nt-top"><div class="chips">${ch(n.channels.mattermost, "Mattermost")}${ch(n.channels.telegram, "Telegram")}</div>
+      <button class="btn" data-ntest ${anyCh ? "" : "disabled title='secrets.yaml 에 웹훅 주소를 먼저 넣어 줘'"}>테스트 알림 보내기</button></div>
+      ${anyCh ? "" : '<div class="sub">~/bc250-dash/secrets.yaml 에 웹훅 주소를 넣으면 켜져 (재시작 필요 없음)</div>'}</div></div>
+    ${quietRow}
+    <div class="row"><div class="k">지금 문제</div><div>${items || '<span class="empty">없음</span>'}${mute}</div></div>
+    <div class="row"><div class="k">최근 전송</div><div class="nt-log">${log || '<span class="empty" style="grid-column:1/-1">아직 보낸 알림 없음</span>'}</div></div>
+  </div>`;
+}
+function notifyHead(n) {
+  if (!n) return "";
+  const R = n.rules, m = (x) => x >= 60 ? `${Math.round(x / 60)}분` : `${x}초`;
+  const q = n.quiet || {};
+  return n.enabled ? `빨강 ${m(R.bad_seconds)} · 노랑 ${m(R.warn_seconds)} 넘게 계속되면 보냄 · 같은 문제 ${R.cooldown_minutes}분 쿨다운 · 인지한 건 안 보냄${q.on ? ` · 🌙 ${q.start}~${q.end}` : ""}`
+    : "꺼짐 (config.yaml → notify.enabled)";
+}
+
+// ── 조용한 시간 저장 ──
+let qSavedAt = 0, qBusy = false;
+async function saveQuiet(patch) {
+  try {
+    const r = await fetch("api/notify/quiet", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(patch)});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.status);
+    if (S && S.notify) S.notify.quiet = {...S.notify.quiet, ...j.quiet, on: j.quiet.enabled};
+    qSavedAt = Date.now();
+  } catch (err) { alert("저장 실패: " + err.message); }
+  qBusy = false;
+  setTimeout(load, 500);
+}
+document.addEventListener("focusin", (e) => { if (e.target.matches("input[data-q]")) qBusy = true; });
+document.addEventListener("focusout", (e) => { if (e.target.matches("input[data-q]")) setTimeout(() => { qBusy = false; }, 300); });
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.matches("input[data-q]") && t.value) saveQuiet({[t.dataset.q]: t.value});
+});
+
+// ── 실패한 서비스 줄 (PC·폰 같이 씀) ──
+const md = (t) => new Date(t * 1000).toLocaleString("ko-KR", {timeZone: TZ, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false});
+// 토글 스위치 하나 그리기: attrs = data-… 속성, on = 켜짐 여부
+const tg = (attrs, on, label, cls = "") => `<button type="button" class="tg ${cls}" role="switch" aria-checked="${on ? "true" : "false"}" ${attrs}>${label ? `<span>${label}</span>` : ""}<i></i></button>`;
+// 서비스 줄 / 포트 줄 인지 토글 (문제 있을 때나 이미 인지했을 때만)
+const svcAck = (s) => (s.state === "warn" || s.state === "bad") ? tg(`data-sack="${esc(s.name)}" data-on="${s.acked ? 0 : 1}"`, !!s.acked, "인지", "sm") : "";
+const portAck = (u) => u.exposure === "lan" ? tg(`data-pack="${u.port}" data-on="${u.acked ? 0 : 1}"`, !!u.acked, "인지", "sm") : "";
+// 서비스 "관리" 버튼 (systemd 서비스만 — manual/remote는 systemctl로 제어 못 함)
+const scBtn = (s) => (s.scope === "system" || s.scope === "user") ? `<button type="button" class="btn mini ghost" data-scopen="${esc(s.name)}" title="start/stop/restart/enable/disable">관리</button>` : "";
+// 모바일 접이식 섹션: 새로고침(5초)마다 다시 그려도 열림 상태 유지
+const mdOpen = {};
+document.addEventListener("toggle", (e) => {
+  const k = e.target.dataset && e.target.dataset.mdet;
+  if (k) mdOpen[k] = e.target.open;
+}, true);
+const mdet = (k, head, body) => `<details class="mlist" style="padding:8px 14px" data-mdet="${k}"${mdOpen[k] ? " open" : ""}><summary>${head}</summary>${body}</details>`;
+// 서비스 정렬: 포트 있는 것 먼저(번호 오름차순), 포트 없는 건 아래로 (원래 순서 유지)
+const svcSort = (list) => [...list].sort((a, b) => (a.port ? 0 : 1) - (b.port ? 0 : 1) || ((a.port && b.port) ? a.port - b.port : 0));
+// [목록에 추가] 버튼 / 🆕 줄
+const addBtn = (sg, label = "목록에 추가") => sg ? `<button type="button" class="btn mini" data-add="${esc(JSON.stringify(sg))}" title="서비스 표에 올리기">${label}</button>` : "";
+function newRows(list) {
+  return list.map((it) => {
+    const nm = it.kind === "svc" ? it.unit.replace(/\.service$/, "") : `포트 ${it.port}`;
+    const sub = it.kind === "svc"
+      ? [it.desc, it.port ? `포트 ${it.port}` : "", `${md(it.since)}부터`].filter(Boolean).join(" · ")
+      : [it.proc || "?", it.owner ? it.owner.unit + (it.owner.scope === "user" ? " (user)" : "") : "직접 띄운 프로그램", "🏢 사내망", `${md(it.since)}부터`].join(" · ");
+    return `<div class="fl"><span class="dot warn"></span>
+      <div class="mid"><div class="nm">🆕 ${esc(nm)}${it.user ? '<span class="tag">user</span>' : ""}</div><div class="sb">${esc(sub)}</div></div>
+      <div class="acts"><button type="button" class="btn mini ghost" data-skip="${esc(it.key)}" title="알고 있는 거라 목록엔 안 올림">넘기기</button>${addBtn({...it.suggest, key: it.key})}</div></div>`;
+  }).join("");
+}
+let addSg = null;
+function openAdd(sg) {
+  addSg = sg;
+  $("am-name").value = sg.name || "";
+  $("am-note").value = "";
+  $("am-opt").setAttribute("aria-checked", "false");
+  $("am-err").hidden = true;
+  const where = sg.scope === "manual" ? `직접 띄운 프로그램${sg.process ? " (" + sg.process + ")" : ""} · 수동 실행 (포트가 열려 있으면 켜진 걸로 봐)`
+    : `${sg.unit} · ${sg.scope === "user" ? "사용자 서비스 (--user)" : "시스템 서비스"}`;
+  $("am-info").innerHTML = `${esc(where)}${sg.port ? `<br>포트 ${sg.port}` : "<br>포트 없음"}`;
+  $("addModal").hidden = false;
+  setTimeout(() => $("am-name").focus(), 50);
+}
+$("am-opt").addEventListener("click", (e) => { e.stopPropagation(); const b = $("am-opt"); b.setAttribute("aria-checked", b.getAttribute("aria-checked") !== "true"); });
+$("am-cancel").addEventListener("click", () => { $("addModal").hidden = true; });
+$("addModal").addEventListener("click", (e) => { if (e.target.id === "addModal") $("addModal").hidden = true; });
+$("am-ok").addEventListener("click", async () => {
+  const b = $("am-ok"); b.disabled = true;
+  try {
+    const r = await fetch("api/services/add", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...addSg, name: $("am-name").value.trim(), note: $("am-note").value.trim(),
+                            optional: $("am-opt").getAttribute("aria-checked") === "true"})});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.status);
+    $("addModal").hidden = true;
+    setTimeout(load, 800);
+  } catch (err) { $("am-err").textContent = err.message; $("am-err").hidden = false; }
+  b.disabled = false;
+});
+async function postJSON(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+function failedRows(list) {
+  return list.map((f) => {
+    const when = f.failed_at ? `${md(f.failed_at)} 실패` : "실패";
+    const sub = f.acked ? `${when} · ${f.acked_at ? md(f.acked_at) + "에 " : ""}인지함` : `${when}${f.desc ? " · " + f.desc : ""}`;
+    return `<div class="fl ${f.acked ? "acked" : ""}">
+      <span class="dot ${f.acked ? "off" : "bad"}"></span>
+      <div class="mid"><div class="nm">${esc(f.unit.replace(/\.service$/, ""))}${f.user ? '<span class="tag">user</span>' : ""}${f.acked ? '<span class="ackt">인지됨</span>' : ""}</div>
+        <div class="sb">${esc(sub)}</div></div>
+      ${tg(`data-ack="${esc(f.unit)}" data-on="${f.acked ? 0 : 1}"`, f.acked, "인지")}</div>`;
+  }).join("");
+}
+document.addEventListener("click", async (e) => {
+  const ad = e.target.closest("[data-add]");
+  if (ad) { openAdd(JSON.parse(ad.dataset.add)); return; }
+  const sk = e.target.closest("[data-skip]");
+  if (sk) { sk.disabled = true; try { await postJSON("api/services/skip", {key: sk.dataset.skip}); } catch (err) { alert(err.message); } setTimeout(load, 600); return; }
+  const rm = e.target.closest("[data-rmsvc]");
+  if (rm) {
+    if (!confirm(`'${rm.dataset.rmsvc}' 을(를) 목록에서 뺄까? (서비스 자체는 안 건드려)`)) return;
+    try { await postJSON("api/services/remove", {name: rm.dataset.rmsvc}); } catch (err) { alert(err.message); }
+    setTimeout(load, 600); return;
+  }
+  const go = e.target.closest("[data-goto]");
+  if (go) { document.querySelector(`nav button[data-tab="${go.dataset.goto}"]`)?.click(); return; }
+  const nt = e.target.closest("[data-ntest]");
+  if (nt) {
+    nt.disabled = true; nt.textContent = "보내는 중…";
+    try {
+      const r = await fetch("api/notify/test", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok && !j.results) throw new Error(j.error || r.status);
+      const res = Object.entries(j.results || {}).map(([k, v]) => `${k}: ${v === "ok" ? "성공 ✓" : v}`).join("\n");
+      alert((j.ok ? "보냈어!\n" : "일부 실패\n") + res);
+    } catch (err) { alert("테스트 실패: " + err.message); }
+    setTimeout(load, 300);
+    return;
+  }
+  const qb = e.target.closest("[data-q]");
+  if (qb && qb.tagName === "BUTTON") {
+    const q = (S && S.notify && S.notify.quiet) || {};
+    let patch;
+    if (qb.dataset.q === "enabled" || qb.dataset.q === "weekend_all_day") {
+      const on = qb.getAttribute("aria-checked") !== "true";
+      qb.setAttribute("aria-checked", on); patch = {[qb.dataset.q]: on};
+    } else if (qb.dataset.q === "day") {
+      const d = +qb.dataset.d, days = new Set(q.days || []);
+      days.has(d) ? days.delete(d) : days.add(d); qb.classList.toggle("on");
+      patch = {days: [...days]};
+    }
+    if (patch) saveQuiet(patch);
+    return;
+  }
+  const b = e.target.closest("[data-ack],[data-mack],[data-sack],[data-pack]");
+  if (!b) return;
+  e.stopPropagation();
+  b.disabled = true;
+  if (b.classList.contains("tg")) b.setAttribute("aria-checked", b.dataset.on === "1");   // 누르자마자 스위치 넘기기
+  else b.textContent = "반영 중…";
+  const body = b.dataset.mack ? {metric: b.dataset.mack} : b.dataset.sack ? {svc: b.dataset.sack}
+    : b.dataset.pack ? {port: +b.dataset.pack} : {unit: b.dataset.ack};
+  try {
+    const r = await fetch("api/ack", {method: b.dataset.on === "1" ? "POST" : "DELETE",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+  } catch (err) { alert("저장 실패: " + err.message); }
+  setTimeout(load, 800);        // 서버가 바로 다시 모으니까 잠깐만 기다렸다가 새로 받기
+});
+
+// ── 모바일 화면 ──
+const mOpen = new Set();           // 펼쳐 둔 그래프 줄
+function spark(key, ref, lv) {
+  const pts = H.filter((p) => p[key] != null);
+  if (pts.length < 2) return '<svg class="spark"></svg>';
+  const step = Math.max(1, Math.floor(pts.length / 60));
+  const v = pts.filter((_, i) => i % step === 0).map((p) => p[key]);
+  const lo = Math.min(...v), hi = Math.max(...v, lo + 1);
+  const xy = v.map((y, i) => `${(i / (v.length - 1) * 100).toFixed(1)},${(26 - (y - lo) / (hi - lo) * 22).toFixed(1)}`).join(" ");
+  const col = lv === "bad" ? "var(--bad)" : lv === "warn" ? "var(--warn)" : "var(--accent)";
+  return `<svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none">
+    <polygon points="0,28 ${xy} 100,28" fill="${col}" opacity=".12"/>
+    <polyline points="${xy}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+}
+function renderMobile() {
+  const h = S.hw, T = S.thresholds;
+  // 헤더 + 알림
+  const st = {ok: "정상", warn: "확인 필요", bad: "문제 있음"}[S.overall];
+  $("m-pill").className = "pill " + S.overall; $("m-pill").textContent = "● " + st;
+  const ackAttr = (a, on) => a ? (a.metric ? `data-mack="${esc(a.metric)}"` : a.svc ? `data-sack="${esc(a.svc)}"`
+    : a.port != null ? `data-pack="${a.port}"` : `data-ack="${esc(a.unit)}"`) + ` data-on="${on}"` : "";
+  const liveIt = S.badges.map((b) => `<div class="it"><span class="dot ${b.level}"></span><span>${esc(b.text)}</span>
+      ${b.ack ? tg(ackAttr(b.ack, 1), false, "인지", "sm") : ""}</div>`).join("");
+  const ackIt = (S.acked || []).map((a) => `<div class="it acked"><span class="dot off"></span><span>${esc(a.text)} · 인지됨</span>
+      ${tg(ackAttr(a.ack, 0), true, "인지", "sm")}</div>`).join("");
+  const mOpenAlert = $("m-alert").querySelector("details")?.open;
+  const sumText = S.badges.length ? `⚠ 확인할 것 ${S.badges.length}개${S.acked_count ? ` · 인지 ${S.acked_count}` : ""}` : `✓ 모든 상태 정상 · 인지된 문제 ${S.acked_count}건`;
+  $("m-alert").innerHTML = S.badges.length || S.acked_count
+    ? `<details class="malert ${S.badges.length ? S.overall : "ok"}" ${mOpenAlert ? "open" : ""}><summary><span>${sumText}</span><span class="chev">▾</span></summary>${liveIt}${ackIt}</details>`
+    : `<div class="malert ok">✓ 모든 상태 정상</div>`;
+  // 개요: 값 + 미니 그래프 한 줄
+  const rows = [
+    {key: "gpu_pct", lb: "GPU", v: f0(h.gpu_pct), u: "%", lv: "ok"},
+    {key: "cpu_pct", lb: "CPU", v: f0(h.cpu_pct), u: "%", lv: "ok"},
+    {key: "apu_temp", lb: "APU 온도", v: f0(h.apu_temp), u: "°C", lv: lvl(h.apu_temp, T.apu_temp_c)},
+    {key: "mem_pct", lb: "메모리", v: f0(h.mem_pct), u: "%", lv: (S.metric_acks || {}).mem_pct ? "acked" : lvl(h.mem_pct, T.mem_pct)},
+    {key: "swap_pct", lb: "스왑", v: f0(h.swap_pct), u: "%", lv: (S.metric_acks || {}).swap_pct ? "acked" : lvl(h.swap_pct, T.swap_pct)},
+    {key: "apu_power", lb: "전력", v: f0(h.apu_power), u: "W", lv: "ok"},
+  ];
+  $("m-rows").innerHTML = rows.map((r) => `
+    <div class="mr ${r.lv}" data-k="${r.key}"><span class="lb">${r.lb}</span><span class="vl num">${r.v}<small>${r.u}</small></span>${spark(r.key, null, r.lv)}</div>
+    <div class="mx ${mOpen.has(r.key) ? "open" : ""}"><div class="plot" id="mpl-${r.key}"></div></div>`).join("") + `
+    <div class="mr ${(S.metric_acks || {}).disk_pct ? "acked" : lvl(h.disk_pct, T.disk_pct)}" style="cursor:default"><span class="lb">디스크</span><span class="vl num">${f0(h.disk_pct)}<small>%</small></span>
+      <div class="mbar"><i style="width:${Math.min(100, h.disk_pct || 0)}%"></i></div></div>`;
+  $("m-rows").querySelectorAll(".mr[data-k]").forEach((el) => el.onclick = () => {
+    const k = el.dataset.k; mOpen.has(k) ? mOpen.delete(k) : mOpen.add(k); renderMobile();
+  });
+  mOpen.forEach((k) => { const c = CHARTS.find((x) => x.key === k); const el = $("mpl-" + k); if (c && el) line(el, c); });
+  $("m-facts").innerHTML = [
+    ["메모리", `${f1(h.mem_used)} / ${f1(h.mem_total)} GB`], ["스왑", `${f1(h.swap_used)} / ${f1(h.swap_total)} GB`],
+    ["GPU 클럭", `${f0(h.gpu_mhz)} MHz`], ["GPU 온도", `${f1(h.gpu_temp)}°C`],
+    ["GTT", h.gtt_used != null ? `${f1(h.gtt_used)} / ${f1(h.gtt_total)} GB` : "—"], ["펌프 팬", `${f0(h.pump_rpm)} RPM`],
+  ].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+
+  // 봇
+  const hz = S.hermes || {};
+  const colors = ["#5c9dff", "#a77bff", "#ff8a5c", "#3ecf7e", "#f0b23e", "#ff6b9a"];
+  $("m-bots").innerHTML = (hz.bots || []).map((b, i) => {
+    const pl = b.platforms.map((p) => linkChip(appLink(b, p.name), `<span class="dot ${p.level}"></span>${esc(p.name)}`, `${p.name} 열기`)).join("");
+    return `<div class="mi"><div class="av" style="--c:${colors[i % colors.length]}">${esc((b.name || "?")[0])}</div>
+      <div class="mid"><div class="nm">${esc(b.name)} <small>${esc(b.role || "")}</small></div>
+        <div class="sb">${esc(b.model || "모델 기록 없음")}</div>${pl ? `<div class="chips" style="margin-top:6px">${pl}</div>` : ""}</div>
+      <div class="rt">${b.last ? esc(ago(b.last)) : "—"}<br><span class="dot ${b.level}" style="display:inline-block;margin-top:5px"></span></div></div>`;
+  }).join("") || '<div class="mi"><span class="empty">봇 정보 없음</span></div>';
+
+  // 서비스
+  const icon = {internal: "🔒", lan: "🏢", internet: "🌐"};
+  const now = Date.now() / 1000 + offset;
+  const svcRow = (s) => {
+    const sub = [s.model, s.used_by, s.note].filter(Boolean).join(" · ");
+    let line2 = sub, cls = "";
+    if (s.exposure === "internet") {
+      const u = s.url;
+      line2 = `${s.subdomain}${s.access ? " · 🔐 보호" : " · ⚠ 보호 없음"}`;
+      if (s.state === "off") line2 += " · 꺼짐";
+      else if (u && !u.ok) { line2 += " · 접속 안 됨"; cls = "bad"; }
+      else if (!s.access) cls = "warn";
+    }
+    if (s.acked) { cls = ""; }
+    // 상태 줄: PC의 "상태" 칸과 같은 내용 (범위 · 선택 · 화면 추가/빼기 · 재시작 횟수 · 인지)
+    const stLine = [
+      `<small>${s.scope === "manual" ? "수동" : s.scope === "remote" ? "원격" : s.scope === "user" ? "user" : "system"}</small>`,
+      s.optional ? "<small>선택</small>" : "",
+      s.extra ? `<small>화면 추가</small> <button type="button" class="btn mini ghost" data-rmsvc="${esc(s.name)}">빼기</button>` : "",
+      s.restarts ? `<small>재시작 ${s.restarts}회</small>` : "",
+      s.acked ? '<span class="ackt">인지됨</span>' : "",
+      svcAck(s),
+    ].filter(Boolean).join(" ");
+    return `<div class="mi"><span class="dot ${s.state === "off" || s.acked ? "off" : s.state}"></span>
+      <div class="mid"><div class="nm">${esc(s.name)}</div>
+        ${line2 ? `<div class="sb ${cls}">${esc(line2)}</div>` : ""}
+        <div class="sb">${stLine}</div></div>
+      <div class="rt">${scBtn(s) ? scBtn(s) + "<br>" : ""}${s.port ? `<span class="port num">${s.port}</span> ` : ""}${s.exposure ? icon[s.exposure] : ""}
+        ${s.since ? `<br>${dur(now - s.since)}` : ""}</div></div>`;
+  };
+  const unk = (S.unknown_ports || []);
+  if (!qBusy) $("m-svc").innerHTML = `${(S.new_items || []).length ? `<div class="mlist-h">🆕 새로 생긴 것 · 목록에 올리거나 넘겨 줘</div><div class="mlist newc" style="padding:2px 14px">${newRows(S.new_items)}</div>` : ""}
+    <div class="mlist-h">🔒 내부 전용 · 🏢 사내망 · 🌐 인터넷</div>
+    <div class="mlist">${svcSort(S.services).map(svcRow).join("")}</div>
+    ${(S.failed || []).length ? mdet("failed", `${(S.failed || []).some((f) => !f.acked) ? "⚠ " : ""}실패한 서비스 ${(S.failed || []).length}개 · 알고 있으면 인지 켜기`, failedRows(S.failed)) : ""}
+    ${mdet("notify", `🔔 알림 · ${esc(notifyHead(S.notify))}`, notifyBody(S.notify))}
+    ${unk.length ? mdet("unknown", `${unk.some((u) => u.exposure === "lan" && !u.acked) ? "⚠ " : ""}목록에 없는 포트 ${unk.length}개`, unk.map((u) =>
+      `<div class="mi"><span class="dot ${u.exposure === "lan" && !u.acked ? "warn" : "off"}"></span><div class="mid"><div class="nm">${esc(u.proc || "?")}${portAck(u)}</div><div class="sb">pid ${u.pid ?? "?"}${u.acked ? " · 인지됨" : ""} ${addBtn(u.suggest)}</div></div><div class="rt"><span class="port num">${u.port}</span> ${icon[u.exposure]}</div></div>`).join("")) : ""}
+    ${(S.other_services || []).length ? mdet("others", `목록에 없는 서비스 ${(S.other_services || []).length}개 · + 로 목록에 올려 줘`, `<div class="others">${(S.other_services || []).map((o) =>
+      `<span class="oth">${esc(o.unit.replace(/\.service$/, ""))}${o.user ? " <small>(user)</small>" : ""}${addBtn(o.suggest, "+")}</span>`).join("")}</div>`) : ""}`;
+
+  // 탭 바 숫자
+  [["hermes", "cnt-hermes"], ["services", "cnt-services"]].forEach(([t, id]) => {
+    const src = $(id), dst = $("m-" + id); dst.hidden = src.hidden; dst.textContent = src.textContent; dst.className = src.className;
+  });
+}
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+load(); loadHistory();
+setInterval(load, REFRESH);
+setInterval(loadHistory, 60000);
+
+// ── 서비스 "관리" 버튼 → 제어 dialog (static/service_control.js) ──
+window.SC_REFRESH = load;                       // dialog 닫히면 화면 새로고침
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-scopen]");
+  if (b && window.SC_OPEN) SC_OPEN(b.dataset.scopen);
+});
+</script>
+<script src="static/service_control.js"></script>
+</body>
+</html>

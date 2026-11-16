@@ -1,0 +1,7 @@
+[Unit]
+Description=mypc MCP 자동 복구 (parked 상태면 hermes-gateway 재시작)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bc250-dash
+ExecStart=%h/bc250-dash/.venv/bin/python %h/bc250-dash/mcp_watchdog.py
