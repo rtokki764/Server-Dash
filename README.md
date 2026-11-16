@@ -131,7 +131,8 @@ services:
 알림 받을 곳(웹훅 주소·토큰)은 `config.yaml` 에 적지 않아. **대시보드 🔔 알림 칸 → 받을 곳 → [+ 받을 곳 추가]** 에서 종류(Mattermost / Slack / Discord / Telegram / ntfy / 일반 웹훅)를 고르고 주소를 붙여넣으면 끝이야.
 - 여러 개 추가할 수 있고, 하나씩 켜고 끄기·**테스트**·수정·삭제가 돼. 저장하면 바로 적용 (재시작 X)
 - 주소·토큰은 서버의 `notify_channels.json` 에만 저장되고(나만 읽게 600 권한, 깃에는 안 올라감) 화면에 다시 보여 주지 않아
-- 주소·토큰은 **HTTPS 로 접속했거나 서버 자기 자신(localhost)에서 볼 때만** 저장돼
+- 주소·토큰은 안전한 접속에서만 저장돼: **HTTPS** / **서버 자기 자신(127.0.0.1)** / **같은 사내망·집 네트워크(192.168.x.x 등)나 Tailscale** 에서 직접 열었을 때. 인터넷 쪽에서 http 로 열면 막아
+  - 그래도 허용하려면 `config.yaml` 의 `notify:` 아래에 `allow_insecure_edit: true`
 - 예전 방식(`secrets.yaml` 에 mattermost / telegram 적기)도 그대로 읽어. 화면에는 "secrets.yaml" 표시로 나오고 끄기만 할 수 있어
 
 ## 서비스 제어 (관리 버튼)

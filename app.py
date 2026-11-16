@@ -1297,14 +1297,33 @@ def api_notify_test():
     return jsonify({"ok": entry["ok"], "results": entry["results"]})
 
 
+def _can_save_secrets():
+    """웹훅 주소·토큰을 저장해도 되는 접속인지:
+    HTTPS(터널 포함) / 서버 자기 자신 / 같은 사내망·집 네트워크(사설 IP, 프록시 없이 직접) 이거나, 설정으로 허용한 경우"""
+    import ipaddress
+    if (CFG.get("notify") or {}).get("allow_insecure_edit"):
+        return True
+    if _secure_enough() or "https" in (request.headers.get("CF-Visitor", "").lower()):
+        return True
+    if request.headers.get("X-Forwarded-For") or request.headers.get("CF-Connecting-IP"):
+        return False                                   # 프록시를 거쳐 온 http → 바깥에서 온 걸 수 있어
+    try:
+        ip = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return False
+    return ip.is_private or ip in ipaddress.ip_network("100.64.0.0/10")    # 사설 IP, Tailscale
+
+
 @app.post("/api/notify/channel")
 def api_notify_channel():
     """받을 곳 추가/수정/삭제 (action: save | delete). 웹훅 주소·토큰이 오가니까 HTTPS(또는 localhost)에서만"""
     if not request.is_json:
         return jsonify({"ok": False, "error": "json only"}), 415
-    if not _secure_enough():
-        return jsonify({"ok": False, "error": "웹훅 주소나 토큰은 HTTPS(또는 서버 자기 자신)에서만 저장할 수 있어"}), 400
     b = request.get_json(silent=True) or {}
+    if b.get("action") != "delete" and not _can_save_secrets():
+        return jsonify({"ok": False, "error": "지금 접속 방식(http, 인터넷 쪽)에서는 웹훅 주소·토큰을 저장할 수 없어. "
+                        "① 서버 자기 자신(http://127.0.0.1:포트)이나 같은 사내망/집 네트워크에서 열거나 ② HTTPS 주소로 열어 줘. "
+                        "(정말 괜찮으면 config.yaml 의 notify 아래에 allow_insecure_edit: true)"}), 400
     try:
         if b.get("action") == "delete":
             NOTIFY.delete_channel(str(b.get("id") or ""))

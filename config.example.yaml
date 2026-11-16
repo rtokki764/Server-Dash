@@ -23,6 +23,7 @@ control:
 notify:
   enabled: false         # 알림을 쓰려면 true (또는 화면 🔔 칸에서 켜기) + 화면에서 '받을 곳' 추가
   # 아래 값은 전부 대시보드 화면 🔔 알림 칸에서 바로 바꿀 수 있어 (화면에서 바꾼 값이 이 파일보다 우선).
+  # allow_insecure_edit: false   # true 면 인터넷 쪽 http 접속에서도 웹훅 주소·토큰 저장 허용 (비추천)
   # bad_seconds: 60          # 빨강이 이만큼(초) 넘게 계속되면 보냄
   # warn_seconds: 600        # 노랑이 이만큼(초) 넘게 계속되면 보냄
   # cooldown_minutes: 30     # 같은 문제는 이 시간 안에 다시 안 보냄
