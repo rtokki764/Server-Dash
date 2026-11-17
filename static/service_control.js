@@ -8,7 +8,7 @@
 (function () {
   "use strict";
 
-  var API = "/service-control/api/services";
+  var API = "service-control/api/services";   // 상대경로: 하위 경로·프록시 뒤에서도 동작
   var LABEL = { start: "Start", stop: "Stop", restart: "Restart", enable: "Enable", disable: "Disable" };
   var DANGER = { stop: true, disable: true };
 
@@ -52,7 +52,15 @@
     opts.headers = opts.headers || {};
     if (opts.body) opts.headers["Content-Type"] = "application/json";
     return fetch(path, opts).then(function (r) {
-      return r.json().then(function (j) { j._status = r.status; return j; });
+      return r.text().then(function (t) {
+        var j;
+        try { j = JSON.parse(t); }
+        catch (e) {
+          var hint = /<html|<!doctype/i.test(t) ? "서버가 JSON 대신 웹페이지를 보냈어 (로그인 만료·프록시·옛 버전 확인)" : "서버 응답을 읽을 수 없어";
+          throw new Error(hint + " [HTTP " + r.status + "]");
+        }
+        j._status = r.status; return j;
+      });
     });
   }
 

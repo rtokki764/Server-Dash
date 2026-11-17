@@ -100,7 +100,7 @@ def load_extras():
 
 
 def _load_agent_extra():
-    """화면에서 저장해 둔 Agent 값([Agent 등록], 봇 아이디)을 CFG["hermes"] 에 합침 (config.yaml 에 적은 값이 우선)"""
+    """화면에서 저장해 둔 Agent 값([Agent 등록], 봇 아이디)을 CFG["hermes"] 에 합침 (봇 아이디·앱 열기 주소는 화면에서 바꾼 값이 우선, 나머지는 config.yaml 이 우선)"""
     saved = _read_json(AGENT_FILE, {})
     if not isinstance(saved, dict):
         return
@@ -108,13 +108,14 @@ def _load_agent_extra():
     merged = {**{k: v for k, v in saved.items() if k != "bots"}, **cur}
     bots = {}
     for k in set(saved.get("bots") or {}) | set(cur.get("bots") or {}):
-        bots[k] = {**((saved.get("bots") or {}).get(k) or {}), **((cur.get("bots") or {}).get(k) or {})}
+        # 봇 아이디(telegram / mattermost)는 화면에서 저장한 값이 config.yaml 보다 우선 (화면에서 끊기한 것도 반영)
+        bots[k] = {**((cur.get("bots") or {}).get(k) or {}), **((saved.get("bots") or {}).get(k) or {})}
     if bots:
         merged["bots"] = bots
     ign = sorted({str(x).lower() for x in (saved.get("ignore") or [])} | {str(x).lower() for x in (cur.get("ignore") or [])})
     if ign:
         merged["ignore"] = ign
-    op = {**(saved.get("open") or {}), **(cur.get("open") or {})}      # 앱 열기 주소 (Mattermost 서버·팀)
+    op = {**(cur.get("open") or {}), **(saved.get("open") or {})}      # 앱 열기 주소 (Mattermost 서버·팀)
     if op:
         merged["open"] = op
     if merged.get("unit") or bots or ign or op:
@@ -596,7 +597,6 @@ def read_hermes_state():
         level = "bad" if prof in parked else max((p["level"] for p in pl), key=["ok", "warn", "bad"].index, default="off")
         out["bots"].append({"id": prof, "name": m.get("name", prof), "role": m.get("role"),
                             "mm_user": m.get("mattermost"), "tg_user": _tg_norm(m.get("telegram")) or None,
-                            "tg_locked": prof in _FILE_TG, "mm_locked": prof in _FILE_MM,   # config.yaml 에 적힌 값이면 화면에서 못 고침 (끊기 버튼 숨김)
                             "parked": prof in parked, "level": level, "platforms": pl,
                             "last": a.get("last"), "model": a.get("model"), "today": a.get("today", 0)})
     return out
@@ -1385,15 +1385,11 @@ def api_agent_bot():
             return jsonify({"ok": False, "error": "텔레그램 봇 아이디는 영문·숫자·_ 만 쓸 수 있어 (예: my_bot). 봇 프로필의 @ 뒤 이름이야"}), 400
         if tg and not tg.lower().endswith("bot"):
             return jsonify({"ok": False, "error": f"'{tg}' 는 봇 아이디가 아닌 것 같아. 텔레그램 봇 아이디는 항상 'bot' 으로 끝나 (예: my_secretary_bot). 봇 프로필의 '@' 뒤 이름이지, 화면에 보이는 이름(예: Mia)이 아니야"}), 400
-        if bid in _FILE_TG and tg != _FILE_TG[bid]:
-            return jsonify({"ok": False, "error": f"이 아이디(@{_FILE_TG[bid]})는 config.yaml 에 적혀 있어서 화면에서는 못 고쳐. config.yaml 의 hermes.bots.{bid}.telegram 을 직접 고치고 대시보드를 재시작해 줘"}), 400
         upd["telegram"] = tg
     if "mattermost" in b:
         mm = _mm_norm(b.get("mattermost"))
         if mm and not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", mm):
             return jsonify({"ok": False, "error": "Mattermost 사용자 이름은 영문 소문자·숫자·. _ - 만 쓸 수 있어 (예: thia). 봇 프로필의 @ 뒤 이름이야"}), 400
-        if bid in _FILE_MM and mm != _FILE_MM[bid]:
-            return jsonify({"ok": False, "error": f"이 이름(@{_FILE_MM[bid]})은 config.yaml 에 적혀 있어서 화면에서는 못 고쳐. config.yaml 의 hermes.bots.{bid}.mattermost 를 직접 고치고 대시보드를 재시작해 줘"}), 400
         upd["mattermost"] = mm
     if not upd:
         return jsonify({"ok": False, "error": "바꿀 값이 없어"}), 400
@@ -1404,9 +1400,10 @@ def api_agent_bot():
         sb = saved.setdefault("bots", {}).setdefault(bid, {})
         cur = CFG.setdefault("hermes", {}).setdefault("bots", {}).setdefault(bid, {})
         for k, v in upd.items():
+            from_file = (k == "telegram" and bid in _FILE_TG) or (k == "mattermost" and bid in _FILE_MM)
             for d in (sb, cur):
-                if v:
-                    d[k] = v
+                if v or from_file:
+                    d[k] = v            # config.yaml 에 적힌 값을 끊기하면 "" 로 덮어서 비움
                 else:
                     d.pop(k, None)
         _write_json(AGENT_FILE, saved)
@@ -1426,8 +1423,6 @@ def api_agent_open():
         v = _host_norm(b.get("server"))
         if v and not re.fullmatch(r"[A-Za-z0-9.\-]+(:\d{1,5})?(/[A-Za-z0-9._~\-/]*)?", v):
             return jsonify({"ok": False, "error": "서버 주소가 이상해. 예: mm.example.com (https:// 는 빼도 돼)"}), 400
-        if v and "." not in v and ":" not in v and v.lower() != "localhost":
-            return jsonify({"ok": False, "error": f"'{v}' 는 서버 주소처럼 안 보여 (점 . 이 없어). 서버 주소는 mm.example.com 처럼 써야 해. 봇 이름 칸이랑 바뀐 건 아닌지 확인해 줘"}), 400
         upd["server"] = v
     if "team" in b:
         v = str(b.get("team") or "").strip().strip("/").lower()
@@ -1436,9 +1431,6 @@ def api_agent_open():
         upd["team"] = v
     if not upd:
         return jsonify({"ok": False, "error": "바꿀 값이 없어"}), 400
-    for k, v in upd.items():
-        if _FILE_OPEN.get(k) and v != str(_FILE_OPEN[k]):
-            return jsonify({"ok": False, "error": f"{k} 는 config.yaml 의 hermes.open.{k} 에 적혀 있어서 화면에서는 못 고쳐. config.yaml 을 직접 고치고 재시작해 줘"}), 400
     with EXTRA_LOCK:
         saved = _read_json(AGENT_FILE, {})
         if not isinstance(saved, dict):
