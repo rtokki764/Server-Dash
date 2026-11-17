@@ -159,7 +159,8 @@ def _client_ip():
 
 def _secure_enough():
     """비밀번호를 받아도 되는 조건: HTTPS 이거나 localhost (터널 뒤면 remote_addr가 127.0.0.1)."""
-    if request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https":
+    fwd = request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower()   # "https, http" 처럼 여러 값이 와도 첫 값
+    if request.is_secure or fwd == "https":
         return True
     return (request.remote_addr or "") in ("127.0.0.1", "::1")
 
@@ -191,7 +192,8 @@ def make_service_control(get_services, cfg=None, controller=None):
         password = body.get("password")
         if password is not None:
             if not _secure_enough():
-                return jsonify({"ok": False, "error": "비밀번호는 HTTPS에서만 보낼 수 있어"}), 400
+                seen = request.headers.get("X-Forwarded-Proto") or "없음"
+                return jsonify({"ok": False, "error": "비밀번호는 HTTPS에서만 보낼 수 있어 (앱이 본 값: X-Forwarded-Proto=%s, 접속 IP=%s)" % (seen, request.remote_addr or "?")}), 400
             if lockout.is_locked(ip):
                 return jsonify({"ok": False, "error": "실패가 반복돼서 잠깐 잠갔어. 5분 뒤에 다시 해 줘."}), 429
 

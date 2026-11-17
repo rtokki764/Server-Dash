@@ -707,7 +707,6 @@ function renderServices() {
     // "상태" 칸: 범위 태그 + 재시작 횟수 + 인지 토글을 전부 모아서
     const stateCell = [
       scopeTag || '<span class="tag">system</span>',
-      s.optional ? '<span class="tag">선택</span>' : "",
       s.restarts ? `<span class="tag" title="재시작 횟수">재시작 ${s.restarts}회</span>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -1296,11 +1295,9 @@ function renderMobile() {
       else if (!s.access) cls = "warn";
     }
     if (s.acked) { cls = ""; }
-    // 상태 줄: PC의 "상태" 칸과 같은 내용 (범위 · 선택 · 재시작 횟수 · 인지)
+    // 상태 줄: PC의 "상태" 칸과 같은 내용 (범위 · 재시작 횟수 · 인지)
     const stLine = [
       `<small>${s.scope === "manual" ? "수동" : s.scope === "remote" ? "원격" : s.scope === "user" ? "user" : "system"}</small>`,
-      s.optional ? "<small>선택</small>" : "",
-      
       s.restarts ? `<small>재시작 ${s.restarts}회</small>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
