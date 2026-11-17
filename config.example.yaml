@@ -9,6 +9,7 @@ dashboard:
   title: ""              # 비워 두면 서버 hostname 이 제목이 돼
   host: 127.0.0.1        # 자기 자신만 접속 가능 (밖에서 보려면 터널/리버스 프록시 + 로그인 보호)
   port: 5070
+  # trusted_proxy: 192.168.0.10   # 리버스 프록시(nginx 등)가 다른 PC 에 있으면 그 IP. 이걸 켜야 프록시 뒤 https 접속에서 비밀번호 입력이 됨
   refresh_seconds: 5
   history_hours: 6
   sample_seconds: 60

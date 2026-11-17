@@ -1579,6 +1579,12 @@ if __name__ == "__main__":
     try:
         from waitress import serve
         print(f"대시보드 시작: http://{D.get('host', '127.0.0.1')}:{D.get('port', 5070)}", flush=True)
-        serve(app, host=D.get("host", "127.0.0.1"), port=D.get("port", 5070), threads=4)
+        kw = {}
+        tp = str(D.get("trusted_proxy") or "").strip()      # 리버스 프록시 IP. 이 IP 가 보낸 X-Forwarded-Proto 만 믿음
+        if tp:
+            # waitress 는 기본으로 X-Forwarded-* 헤더를 전부 지워 버려서, 프록시가 https 라고 알려 줘도 앱은 못 봄
+            kw = dict(trusted_proxy=tp, trusted_proxy_headers={"x-forwarded-proto"})
+            print(f"프록시 신뢰: {tp} (X-Forwarded-Proto 만)", flush=True)
+        serve(app, host=D.get("host", "127.0.0.1"), port=D.get("port", 5070), threads=4, **kw)
     except ImportError:
         app.run(host=D.get("host", "127.0.0.1"), port=D.get("port", 5070), threaded=True)

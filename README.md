@@ -147,6 +147,7 @@ services:
 - user 서비스는 `systemctl --user` 로 바로 실행돼
 - system 서비스는 그냥 시도 → `sudo -n` → 안 되면 **비밀번호 입력창**이 떠서 `sudo -S` 로 재시도
 - 비밀번호는 그 요청 한 번에만 쓰고 **저장하지 않아** (로그에도 안 남음). 3번 틀리면 5분 잠금. HTTPS(또는 localhost)에서만 입력 가능
+- **리버스 프록시(nginx 등) 뒤에서 HTTPS 로 접속하는데 "비밀번호는 HTTPS에서만…" 이 나오면**: 프록시에 `proxy_set_header X-Forwarded-Proto $scheme;` 를 넣고, `config.yaml` 의 `dashboard:` 아래에 `trusted_proxy: <프록시 PC 의 IP>` 를 적은 뒤 `bash install.sh`. (이걸 안 적으면 waitress 가 프록시 헤더를 지워서 앱이 https 인 걸 못 봐. 에러 문구의 "앱이 본 값" 이 "없음" 이면 이 경우)
 - 허용하는 동작은 5개뿐이고, 설정에 등록된 서비스만 제어할 수 있어
 - 끄려면 `config.yaml` 의 `control: enabled: false`
 
