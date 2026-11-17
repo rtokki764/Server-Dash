@@ -195,7 +195,11 @@
         body: JSON.stringify(password ? { password: password } : {})
       }).then(function (j) {
         password = null;
-        if (j.ok) { toast(name + " " + LABEL[action] + " 성공 (" + (j.via || "?") + ")"); refresh(); }
+        if (j.ok) {
+          toast(name + " " + LABEL[action] + " 성공 (" + (j.via || "?") + ")");
+          refresh();                                        // 다이얼로그 상태
+          if (window.SC_REFRESH) window.SC_REFRESH();       // 메인 표도 바로 갱신
+        }
         else if (j.need_password) { askPassword(action); }
         else if (j.bad_password) { askPassword(action, "비밀번호가 틀렸어. 다시 입력해 줘."); toast(j.error || "비밀번호 오류", true); }
         else { toast(j.error || "실패", true); refresh(); }

@@ -624,6 +624,10 @@ def read_hermes():
             msg = j.get("MESSAGE", "")
             if isinstance(msg, list):
                 msg = bytes(msg).decode("utf-8", "replace")
+            elif not isinstance(msg, str):
+                msg = "" if msg is None else str(msg)       # coredump 항목처럼 MESSAGE 가 null 이어도 수집 전체가 죽지 않게
+            if not msg:
+                continue                                    # 빈 글은 볼 게 없고, 빈 글에 맞는 패턴이 있으면 오히려 에러가 나
             lines.append((int(j["__REALTIME_TIMESTAMP"]) / 1e6, msg))
         except Exception:
             continue
@@ -1006,6 +1010,7 @@ def _invalidate(*keys):
 WAKE = threading.Event()    # 인지함을 누르면 다음 수집을 기다리지 않고 바로 다시 모으게
 
 
+
 def collect_once():
     now = time.time()
     hw = read_hardware()
@@ -1019,7 +1024,12 @@ def collect_once():
         urls.update({r["url"]: check_url(r["url"]) for r in CFG.get("remote", [])})
         _slow.update(urls=urls, urls_at=now)
     if now - _slow["hermes_at"] > 30:
-        ep, hz = _EPOCH["n"], read_hermes()
+        ep = _EPOCH["n"]
+        try:
+            hz = read_hermes()
+        except Exception as e:                      # 로그 읽기가 실패해도 화면 전체가 멈추지 않게 옛 값을 유지
+            print("read_hermes error:", repr(e), flush=True)
+            hz, _slow["hermes_at"] = _slow["hermes"], now
         if ep == _EPOCH["n"]:                       # 읽는 사이에 설정이 바뀌었으면 버리고 다음 수집에서 다시 읽음
             _slow.update(hermes=hz, hermes_at=now)
 
@@ -1132,7 +1142,12 @@ def loop():
 # ─────────────────────────────────────────────
 app = Flask(__name__)
 # 서비스 제어 모듈 (관리 버튼 → start/stop/restart/enable/disable)
-app.register_blueprint(make_service_control(all_services, CFG))
+def _service_control_changed(name, action, result):
+    _invalidate("ports", "hermes")      # 켜고 끈 직후엔 포트·로그 정보도 바로 다시 읽어
+    WAKE.set()                          # 다음 수집을 기다리지 않고 지금 바로 모아
+
+
+app.register_blueprint(make_service_control(all_services, CFG, on_change=_service_control_changed))
 
 
 @app.get("/")

@@ -165,7 +165,7 @@ def _secure_enough():
     return (request.remote_addr or "") in ("127.0.0.1", "::1")
 
 
-def make_service_control(get_services, cfg=None, controller=None):
+def make_service_control(get_services, cfg=None, controller=None, on_change=None):
     """Blueprint 만들기. cfg["control"] 섹션을 읽음 (없으면 기본값 = 꺼짐)."""
     c = (cfg or {}).get("control") or {}
     enabled = bool(c.get("enabled", False))
@@ -205,6 +205,11 @@ def make_service_control(get_services, cfg=None, controller=None):
             lockout.record_ok(ip)
         log.info("control result: service=%s action=%s ok=%s via=%s",
                  name, action, result.get("ok"), result.get("via"))
+        if on_change and result.get("ok"):          # 성공했을 때만 화면 데이터를 바로 새로 모으게 알려 줌
+            try:
+                on_change(name, action, result)
+            except Exception:
+                log.exception("on_change 실패")
         return jsonify(result), status_code
 
     return bp

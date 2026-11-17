@@ -184,3 +184,7 @@ app.register_blueprint(make_service_control(get_services, cfg))
 | `VERSION` | 현재 버전 (화면 아래에 표시) |
 | `demo.py` | 가짜 데이터로 화면만 확인 (`BC250_DEMO=1 python app.py`) |
 | `mcp_watchdog.py` | (선택) Hermes 에이전트용 자동 복구. 설정이 없으면 아무것도 안 함 |
+
+## 화면이 안 바뀌거나 "불러오는 중"에서 멈출 때 (v1.52)
+- journald 에 MESSAGE 가 비어 있는 기록(systemd-coredump 등)이 있으면 로그 읽기가 에러가 나서 화면 전체가 멈췄었어. 이제 그런 기록은 건너뛰고, 로그 읽기가 실패해도 이전 값으로 화면은 계속 갱신돼.
+- 서비스를 켜고 끈 직후(성공했을 때)에는 포트·로그 정보도 바로 다시 모으고 메인 표도 바로 갱신해.
