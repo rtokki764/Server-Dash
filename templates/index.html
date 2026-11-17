@@ -704,11 +704,10 @@ function renderServices() {
       exp = `<span class="exp ${s.exposure}">${icon[s.exposure]} ${word[s.exposure]}</span>`;
     }
     const portCell = s.port ? `<span class="port">${s.port}</span>${s.listening === false ? '<div class="exp-sub bad">안 열림</div>' : ""}` : '<span class="empty">—</span>';
-    // "상태" 칸: 범위 태그 + 화면 추가/빼기 + 재시작 횟수 + 인지 토글을 전부 모아서
+    // "상태" 칸: 범위 태그 + 재시작 횟수 + 인지 토글을 전부 모아서
     const stateCell = [
       scopeTag || '<span class="tag">system</span>',
       s.optional ? '<span class="tag">선택</span>' : "",
-      s.extra ? '<span class="tag">화면 추가</span>' : "",
       s.restarts ? `<span class="tag" title="재시작 횟수">재시작 ${s.restarts}회</span>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
       svcAck(s),
@@ -1297,11 +1296,10 @@ function renderMobile() {
       else if (!s.access) cls = "warn";
     }
     if (s.acked) { cls = ""; }
-    // 상태 줄: PC의 "상태" 칸과 같은 내용 (범위 · 선택 · 화면 추가/빼기 · 재시작 횟수 · 인지)
+    // 상태 줄: PC의 "상태" 칸과 같은 내용 (범위 · 선택 · 재시작 횟수 · 인지)
     const stLine = [
       `<small>${s.scope === "manual" ? "수동" : s.scope === "remote" ? "원격" : s.scope === "user" ? "user" : "system"}</small>`,
       s.optional ? "<small>선택</small>" : "",
-      s.extra ? "<small>화면 추가</small>" : "",
       
       s.restarts ? `<small>재시작 ${s.restarts}회</small>` : "",
       s.acked ? '<span class="ackt">인지됨</span>' : "",
