@@ -39,12 +39,12 @@
   st.textContent = css;
   document.head.appendChild(st);
 
-  function toast(msg, isErr) {
+  function toast(msg, isErr, onDone) {
     var t = document.createElement("div");
     t.className = "sc-toast" + (isErr ? " sc-err" : "");
     t.textContent = msg;
     document.body.appendChild(t);
-    setTimeout(function () { t.remove(); }, 4000);
+    setTimeout(function () { t.remove(); if (onDone) onDone(); }, 4000);
   }
 
   function api(path, opts) {
@@ -75,9 +75,12 @@
     document.body.appendChild(overlay);
 
     var current = null;
+    var closed = false;
 
     function onKey(e) { if (e.key === "Escape") close(); }
     function close() {
+      if (closed) return;                    // 토스트 끝날 때 닫기 + 사용자가 먼저 닫기 중복 방지
+      closed = true;
       document.removeEventListener("keydown", onKey);
       overlay.remove();
       if (window.SC_REFRESH) window.SC_REFRESH();
@@ -196,8 +199,9 @@
       }).then(function (j) {
         password = null;
         if (j.ok) {
-          toast(name + " " + LABEL[action] + " 성공 (" + (j.via || "?") + ")");
-          refresh();                                        // 다이얼로그 상태
+          // 성공 토스트가 사라질 때 관리 창도 같이 닫히게 예약 (버튼 누르자마자 닫지 않음)
+          toast(name + " " + LABEL[action] + " 성공 (" + (j.via || "?") + ")", false, close);
+          refresh();                                        // 토스트 보이는 동안 창에는 최신 상태 표시
           if (window.SC_REFRESH) window.SC_REFRESH();       // 메인 표도 바로 갱신
         }
         else if (j.need_password) { askPassword(action); }
